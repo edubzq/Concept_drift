@@ -1,0 +1,17 @@
+# Entorno virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# Datos y resultados
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Otros
+.DS_Store
