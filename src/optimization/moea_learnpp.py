@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 import pandas as pd
@@ -7,82 +8,29 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
-from learnpp_nse import LearnPPNSE
-from test_ensembles import load_blocks
+from src.ensembles.learnpp_nse import LearnPPNSE
+from src.data.loading import load_blocks
+from src.utils.metrics import compute_ensemble_diversity
 
-
-# ============================================
-# Configuración
-# ============================================
 
 DATASET_PATH = "datasets/agrawal_abrupt.csv"
 
-# Puedes usar solo una parte reciente si quieres acelerar pruebas
 USE_RECENT_WINDOW = False
 RECENT_N_BLOCKS = 10
 
-# Rango de búsqueda
+CACHE_DECIMALS = 4
+USE_ELAPSED_TIME_OBJECTIVE = False
+
 A_MIN, A_MAX = 0.1, 2.0
 B_MIN, B_MAX = 1.0, 15.0
 MAX_SIZE_MIN, MAX_SIZE_MAX = 5, 30
 
-# NSGA-II
 POP_SIZE = 20
 N_GEN = 15
 SEED = 42
 
 
-# ============================================
-# Diversidad del ensemble
-# ============================================
-
-def compute_ensemble_diversity(model, X):
-    """
-    Diversidad media por pares basada en disagreement.
-    """
-    if not hasattr(model, "models") or len(model.models) < 2:
-        return 0.0
-
-    X_dict = X.to_dict(orient="records")
-    preds = []
-
-    for base_model in model.models:
-        model_preds = []
-        for xi in X_dict:
-            pred = base_model.predict_one(xi)
-            model_preds.append(pred)
-        preds.append(model_preds)
-
-    preds = np.array(preds)
-    n_models = preds.shape[0]
-
-    total_disagreement = 0.0
-    total_pairs = 0
-
-    for i in range(n_models):
-        for j in range(i + 1, n_models):
-            disagreement = np.mean(preds[i] != preds[j])
-            total_disagreement += disagreement
-            total_pairs += 1
-
-    if total_pairs == 0:
-        return 0.0
-
-    return float(total_disagreement / total_pairs)
-
-
-# ============================================
-# Evaluación de una configuración
-# ============================================
-
 def evaluate_learnpp_config(chunks, a, b, max_size):
-    """
-    Evalúa una configuración concreta de LearnPPNSE.
-    Devuelve:
-        mean_acc
-        mean_div
-        elapsed_time
-    """
     model = LearnPPNSE(
         a=float(a),
         b=float(b),
@@ -96,11 +44,11 @@ def evaluate_learnpp_config(chunks, a, b, max_size):
 
     for i, (X, y) in enumerate(chunks):
         if i > 0:
-            preds = np.array(model.predict(X))
+            preds, base_predictions = model.predict_with_base_predictions(X)
             acc = np.mean(preds == y)
             accuracies.append(acc)
 
-            div = compute_ensemble_diversity(model, X)
+            div = compute_ensemble_diversity(model, base_predictions=base_predictions)
             diversities.append(div)
 
         model.fit_chunk(X, y)
@@ -113,13 +61,10 @@ def evaluate_learnpp_config(chunks, a, b, max_size):
     return mean_acc, mean_div, elapsed
 
 
-# ============================================
-# Problema multiobjetivo
-# ============================================
-
 class LearnPPNSGAProblem(ElementwiseProblem):
     def __init__(self, chunks):
         self.chunks = chunks
+        self.evaluation_cache = {}
 
         super().__init__(
             n_var=3,
@@ -134,30 +79,29 @@ class LearnPPNSGAProblem(ElementwiseProblem):
         b = float(x[1])
         max_size = int(round(x[2]))
 
-        acc, div, elapsed = evaluate_learnpp_config(
-            self.chunks,
-            a=a,
-            b=b,
-            max_size=max_size
-        )
+        cache_key = (round(a, CACHE_DECIMALS), round(b, CACHE_DECIMALS), max_size)
 
-        # pymoo minimiza
+        if cache_key not in self.evaluation_cache:
+            self.evaluation_cache[cache_key] = evaluate_learnpp_config(
+                self.chunks,
+                a=a,
+                b=b,
+                max_size=max_size
+            )
+
+        acc, div, elapsed = self.evaluation_cache[cache_key]
+
         f1 = -acc
         f2 = -div
-        f3 = elapsed
+        if USE_ELAPSED_TIME_OBJECTIVE:
+            f3 = elapsed
+        else:
+            f3 = max_size * max(len(self.chunks) - 1, 1)
 
         out["F"] = np.array([f1, f2, f3], dtype=float)
 
 
-# ============================================
-# Selección de una solución final del frente
-# ============================================
-
 def choose_compromise_solution(res):
-    """
-    Selección simple de una solución de compromiso.
-    score = 0.6*acc + 0.3*div - 0.1*cost_normalized
-    """
     F = np.array(res.F, dtype=float)
     X = np.array(res.X, dtype=float)
 
@@ -165,7 +109,6 @@ def choose_compromise_solution(res):
     div = -F[:, 1]
     cost = F[:, 2]
 
-    # normalización simple
     cost_min, cost_max = np.min(cost), np.max(cost)
     if cost_max > cost_min:
         cost_norm = (cost - cost_min) / (cost_max - cost_min)
@@ -177,10 +120,6 @@ def choose_compromise_solution(res):
 
     return best_idx, X[best_idx], F[best_idx], score[best_idx]
 
-
-# ============================================
-# Utilidad para mostrar resultados
-# ============================================
 
 def pareto_to_df(res):
     rows = []
@@ -200,16 +139,15 @@ def pareto_to_df(res):
             "max_size": max_size,
             "accuracy": round(acc, 6),
             "diversity": round(div, 6),
-            "time": round(cost, 6),
+            "cost": round(cost, 6),
         })
 
     df = pd.DataFrame(rows)
-    return df.sort_values(by=["accuracy", "diversity"], ascending=[False, False]).reset_index(drop=True)
+    return df.sort_values(
+        by=["accuracy", "diversity"],
+        ascending=[False, False]
+    ).reset_index(drop=True)
 
-
-# ============================================
-# Main
-# ============================================
 
 def main():
     chunks = load_blocks(DATASET_PATH)
@@ -219,13 +157,11 @@ def main():
 
     print(f"Dataset: {DATASET_PATH}")
     print(f"Número de bloques usados: {len(chunks)}")
+    print(f"Evaluaciones máximas NSGA-II: {POP_SIZE * N_GEN}")
+    print(f"Objetivo de coste usa tiempo real: {USE_ELAPSED_TIME_OBJECTIVE}")
 
     problem = LearnPPNSGAProblem(chunks)
-
-    algorithm = NSGA2(
-        pop_size=POP_SIZE
-    )
-
+    algorithm = NSGA2(pop_size=POP_SIZE)
     termination = get_termination("n_gen", N_GEN)
 
     res = minimize(
@@ -248,7 +184,7 @@ def main():
 
     best_acc = -float(best_f[0])
     best_div = -float(best_f[1])
-    best_time = float(best_f[2])
+    best_cost = float(best_f[2])
 
     print("\n=== Solución de compromiso elegida ===")
     print(f"a = {best_a:.4f}")
@@ -256,11 +192,12 @@ def main():
     print(f"max_size = {best_max_size}")
     print(f"accuracy = {best_acc:.6f}")
     print(f"diversity = {best_div:.6f}")
-    print(f"time = {best_time:.6f}")
+    print(f"cost = {best_cost:.6f}")
     print(f"score = {best_score:.6f}")
 
-    df.to_csv("pareto_learnpp.csv", index=False)
-    print("\nFrente guardado en: pareto_learnpp.csv")
+    os.makedirs("results", exist_ok=True)
+    df.to_csv("results/pareto_learnpp.csv", index=False)
+    print("\nFrente guardado en: results/pareto_learnpp.csv")
 
 
 if __name__ == "__main__":

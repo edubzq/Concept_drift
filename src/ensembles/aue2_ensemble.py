@@ -13,47 +13,45 @@ class AUE2Ensemble:
     # Entrenamiento por chunk
     # ----------------------------------------
     def fit_chunk(self, X, y):
+        X_records = X.to_dict(orient="records")
+        y_array = np.asarray(y)
 
-    # Entrenar nuevo modelo
+        # Recalcular pesos de los modelos existentes antes de entrenar el nuevo
+        # clasificador sobre el chunk actual. Así evitamos dar al nuevo modelo un
+        # peso optimista por evaluarlo sobre datos que acaba de memorizar.
+        if self.models:
+            self.weights = [
+                self._weight_from_predictions(model, X_records, y_array)
+                for model in self.models
+            ]
+
+        # Entrenar nuevo modelo
         new_model = tree.HoeffdingTreeClassifier()
-
-        for xi, yi in zip(X.to_dict(orient="records"), y):
+        for xi, yi in zip(X_records, y_array):
             new_model.learn_one(xi, yi)
 
-        # Añadir nuevo modelo
+        # El nuevo clasificador entra con peso neutro hasta la siguiente ventana.
+        # Esto mantiene la evaluación test-then-train del script principal.
+        neutral_weight = float(np.mean(self.weights)) if self.weights else 1.0
         self.models.append(new_model)
-
-        # Recalcular pesos de TODOS los modelos
-        self.weights = []
-
-        for model in self.models:
-            error = self._compute_error(model, X, y)
-            weight = 1 / (error + self.epsilon)
-            self.weights.append(weight)
+        self.weights.append(neutral_weight)
 
         # Si excede tamaño máximo, mantener los mejores
         if len(self.models) > self.max_size:
             self._keep_top_k()
 
     # ----------------------------------------
-    # Calcular error rate
+    # Calcular peso por error rate
     # ----------------------------------------
-    def _compute_error(self, model, X, y):
-
-        wrong = 0
-
-        for xi, yi in zip(X.to_dict(orient="records"), y):
-            pred = model.predict_one(xi)
-            if pred != yi:
-                wrong += 1
-
-        return wrong / len(y)
+    def _weight_from_predictions(self, model, X_records, y):
+        preds = np.array([model.predict_one(xi) for xi in X_records])
+        error = float(np.mean(preds != y))
+        return 1.0 / (error + self.epsilon)
 
     # ----------------------------------------
     # Mantener los K mejores modelos
     # ----------------------------------------
     def _keep_top_k(self):
-
         indices = np.argsort(self.weights)[::-1]  # ordenar descendente
         indices = indices[:self.max_size]
 
@@ -64,11 +62,12 @@ class AUE2Ensemble:
     # Voting ponderado
     # ----------------------------------------
     def predict(self, X):
+        if not self.models:
+            raise ValueError("El ensemble está vacío.")
 
         predictions = []
 
         for xi in X.to_dict(orient="records"):
-
             votes = {}
 
             for model, w in zip(self.models, self.weights):

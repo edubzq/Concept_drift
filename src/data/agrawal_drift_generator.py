@@ -6,16 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-try:
-    from river import synth
-    _RIVER_IMPORT_ERROR = None
-except Exception as e1:
-    try:
-        from river.datasets import synth
-        _RIVER_IMPORT_ERROR = None
-    except Exception as e2:
-        synth = None
-        _RIVER_IMPORT_ERROR = (e1, e2)
+from river.datasets import synth
 
 from calm_data_generator.generators.stream.StreamBlockGenerator import (
     SyntheticBlockGenerator,
@@ -78,11 +69,6 @@ def generate_abrupt(cfg: DriftDatasetConfig) -> str:
     """
     Drift abrupto: mitad inicial con concepto A, mitad final con concepto B.
     """
-    if synth is None:
-        raise ImportError(
-            "Para ejecutar este tutorial necesitas instalar el extra de stream: "
-            "`pip install calm-data-generator[stream]`."
-        ) from _RIVER_IMPORT_ERROR[0]
 
     concept_a, concept_b = 0, 2
 
