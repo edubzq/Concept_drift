@@ -14,28 +14,24 @@ class AUE2Ensemble:
     # ----------------------------------------
     def fit_chunk(self, X, y):
 
-        # Entrenar nuevo modelo
+    # Entrenar nuevo modelo
         new_model = tree.HoeffdingTreeClassifier()
 
         for xi, yi in zip(X.to_dict(orient="records"), y):
             new_model.learn_one(xi, yi)
 
+        # Añadir nuevo modelo
         self.models.append(new_model)
-
-        # Mantener tamaño máximo
-        if len(self.models) > self.max_size:
-            self.models.pop(0)
 
         # Recalcular pesos de TODOS los modelos
         self.weights = []
 
         for model in self.models:
-
             error = self._compute_error(model, X, y)
             weight = 1 / (error + self.epsilon)
-
             self.weights.append(weight)
-        
+
+        # Si excede tamaño máximo, mantener los mejores
         if len(self.models) > self.max_size:
             self._keep_top_k()
 
