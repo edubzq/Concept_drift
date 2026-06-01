@@ -1,0 +1,3 @@
+dataset,model,window_size,reopt_frequency,pop_size,n_gen,drop_threshold,recovery_ratio,accuracy_mean,accuracy_min,kappa_mean,diversity_mean,recovery_time_mean,num_drops,cost_mean,stream_time,optimization_time,total_time,num_reoptimizations,final_a,final_b,final_max_size
+agrawal_recurrent,Learn++NSE fijo,,,,,0.15,0.6,0.6865641025641027,0.472,0.3936285546874168,0.2754593357583117,5.75,4,15.128205128205128,11.870696295998641,0.0,11.870696295998641,0,0.5,5.0,20
+agrawal_recurrent,Learn++NSE + MOEA dinámico,10.0,10.0,6.0,3.0,0.15,0.6,0.6931282051282052,0.454,0.4044559258511522,0.2892843618339094,4.4,5,9.23076923076923,7.8816081270015275,58.28707738199955,66.16868550900108,3,1.3060460188278469,3.096289415276237,19
