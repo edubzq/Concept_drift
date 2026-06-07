@@ -1,15 +1,15 @@
 import os
 import time
+
 import numpy as np
 import pandas as pd
-
-from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.core.problem import ElementwiseProblem
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
-from src.ensembles.learnpp_nse import LearnPPNSE
 from src.data.loading import load_blocks
+from src.ensembles.learnpp_nse import LearnPPNSE
 from src.utils.metrics import compute_ensemble_diversity
 
 
@@ -149,7 +149,7 @@ def pareto_to_df(res):
     ).reset_index(drop=True)
 
 
-def main():
+def run_offline_moea_experiment():
     chunks = load_blocks(DATASET_PATH)
 
     if USE_RECENT_WINDOW:
@@ -198,6 +198,19 @@ def main():
     os.makedirs("results", exist_ok=True)
     df.to_csv("results/pareto_learnpp.csv", index=False)
     print("\nFrente guardado en: results/pareto_learnpp.csv")
+
+    return {
+        "result": res,
+        "pareto": df,
+        "best_idx": best_idx,
+        "best_x": best_x,
+        "best_f": best_f,
+        "best_score": best_score,
+    }
+
+
+def main():
+    run_offline_moea_experiment()
 
 
 if __name__ == "__main__":
