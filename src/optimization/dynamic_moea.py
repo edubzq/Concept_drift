@@ -10,51 +10,15 @@ from river import metrics
 
 from src.ensembles.learnpp_nse import LearnPPNSE
 from src.optimization.dynamic_config import CandidateEvaluation
-from src.utils.metrics import (
-    compute_ensemble_diversity,
-    compute_multiple_recoveries,
-    _safe_nanmean,
-)
-
-
-def _drift_behavior_metrics(
-    accuracies,
-    drop_threshold=0.15,
-    pre_window=3,
-    recovery_ratio=0.60,
-    local_min_window=5,
-):
-    curve = np.asarray(accuracies, dtype=float)
-
-    if len(curve) == 0:
-        return {
-            "recovery_time": np.nan,
-            "num_drops": 0,
-        }
-
-    if len(curve) == 1:
-        return {
-            "recovery_time": 0.0,
-            "num_drops": 0,
-        }
-
-    _, recovery_mean, _, num_drops = compute_multiple_recoveries(
-        curve,
-        drop_threshold=drop_threshold,
-        pre_window=pre_window,
-        recovery_ratio=recovery_ratio,
-        local_min_window=local_min_window,
-    )
-    recovery_time = 0.0 if np.isnan(recovery_mean) else float(recovery_mean)
-
-    return {
-        "recovery_time": recovery_time,
-        "num_drops": int(num_drops),
-    }
+from src.utils.metrics import compute_ensemble_diversity, _safe_nanmean
 
 
 def _evaluation_cache_key(a, b, max_size, cache_decimals):
-    return (round(float(a), cache_decimals), round(float(b), cache_decimals), int(max_size))
+    return (
+        round(float(a), cache_decimals),
+        round(float(b), cache_decimals),
+        int(max_size),
+    )
 
 
 def _evaluate_learnpp_config_on_window(chunks, a, b, max_size, config):
@@ -75,29 +39,19 @@ def _evaluate_learnpp_config_on_window(chunks, a, b, max_size, config):
         model.fit_chunk(X, y)
 
     elapsed = time.perf_counter() - start
-    drift_metrics = _drift_behavior_metrics(
-        accuracies,
-        drop_threshold=config.drop_threshold,
-        pre_window=config.pre_window,
-        recovery_ratio=config.recovery_ratio,
-        local_min_window=config.local_min_window,
-    )
 
-    accuracy = _safe_nanmean(accuracies)
-    accuracy_min = float(np.min(accuracies)) if len(accuracies) > 0 else np.nan
+    recent_accuracy = _safe_nanmean(accuracies)
     diversity = _safe_nanmean(diversities)
 
     if config.use_elapsed_time_objective:
-        cost = elapsed
+        complexity = float(elapsed)
     else:
-        cost = int(round(max_size)) * max(len(chunks) - 1, 1)
+        complexity = int(round(max_size)) * max(len(chunks) - 1, 1)
 
     return CandidateEvaluation(
-        accuracy=accuracy,
-        accuracy_min=accuracy_min,
+        recent_accuracy=recent_accuracy,
         diversity=diversity,
-        recovery_time=drift_metrics["recovery_time"],
-        cost=float(cost),
+        complexity=float(complexity),
         elapsed=float(elapsed),
     )
 
@@ -126,11 +80,9 @@ class DynamicLearnPPNSGAProblem(ElementwiseProblem):
         a = float(x[0])
         b = float(x[1])
         max_size = int(round(x[2]))
+
         cache_key = _evaluation_cache_key(
-            a,
-            b,
-            max_size,
-            self.config.cache_decimals,
+            a, b, max_size, self.config.cache_decimals
         )
 
         if cache_key not in self.evaluation_cache:
@@ -143,11 +95,12 @@ class DynamicLearnPPNSGAProblem(ElementwiseProblem):
             )
 
         evaluation = self.evaluation_cache[cache_key]
+
         out["F"] = np.array(
             [
-                evaluation.recovery_time,
-                -evaluation.accuracy_min,
-                evaluation.cost,
+                -evaluation.recent_accuracy,  # maximizar precisión reciente
+                -evaluation.diversity,        # maximizar diversidad
+                evaluation.complexity,        # minimizar complejidad
             ],
             dtype=float,
         )
@@ -162,18 +115,23 @@ class DynamicLearnPPNSGAProblem(ElementwiseProblem):
         return self.evaluation_cache[cache_key]
 
 
-def choose_drift_compromise_solution(res):
+def choose_compromise_solution(res):
     F = np.atleast_2d(np.asarray(res.F, dtype=float))
     X = np.atleast_2d(np.asarray(res.X, dtype=float))
 
     normalized = np.zeros_like(F, dtype=float)
+
     for objective_idx in range(F.shape[1]):
         values = F[:, objective_idx]
         min_value = np.min(values)
         max_value = np.max(values)
-        if max_value > min_value:
-            normalized[:, objective_idx] = (values - min_value) / (max_value - min_value)
 
+        if max_value > min_value:
+            normalized[:, objective_idx] = (
+                values - min_value
+            ) / (max_value - min_value)
+
+    # recent_accuracy, diversity, complexity
     weights = np.array([0.45, 0.35, 0.20], dtype=float)
     score = normalized @ weights
     best_idx = int(np.argmin(score))
@@ -183,24 +141,24 @@ def choose_drift_compromise_solution(res):
 
 def _pareto_to_df(res, problem, block_index):
     rows = []
+
     for x, f in zip(np.atleast_2d(res.X), np.atleast_2d(res.F)):
         evaluation = problem.get_cached_evaluation(x)
+
         rows.append({
             "block_index": int(block_index),
             "a": round(float(x[0]), 4),
             "b": round(float(x[1]), 4),
             "max_size": int(round(x[2])),
-            "recovery_time": round(float(f[0]), 6),
-            "accuracy_mean": round(evaluation.accuracy, 6),
-            "accuracy_min": round(evaluation.accuracy_min, 6),
-            "cost": round(float(f[2]), 6),
+            "recent_accuracy": round(evaluation.recent_accuracy, 6),
             "diversity": round(evaluation.diversity, 6),
+            "complexity": round(evaluation.complexity, 6),
             "evaluation_elapsed": round(evaluation.elapsed, 6),
         })
 
     return pd.DataFrame(rows).sort_values(
-        by=["recovery_time", "accuracy_min", "cost"],
-        ascending=[True, False, True],
+        by=["recent_accuracy", "diversity", "complexity"],
+        ascending=[False, False, True],
     ).reset_index(drop=True)
 
 
@@ -233,22 +191,12 @@ def _predict_update_metrics(model, X, y, kappa_metric):
     return accuracy, float(kappa_metric.get()), diversity
 
 
-def _summarize_run(accuracies, kappas, diversities, elapsed, config, extra=None):
-    drift_metrics = _drift_behavior_metrics(
-        accuracies,
-        drop_threshold=config.drop_threshold,
-        pre_window=config.pre_window,
-        recovery_ratio=config.recovery_ratio,
-        local_min_window=config.local_min_window,
-    )
-
+def _summarize_run(accuracies, kappas, diversities, elapsed, extra=None):
     summary = {
         "accuracy_mean": _safe_nanmean(accuracies),
         "accuracy_min": float(np.min(accuracies)) if len(accuracies) > 0 else np.nan,
         "kappa_mean": _safe_nanmean(kappas),
         "diversity_mean": _safe_nanmean(diversities),
-        "recovery_time_mean": drift_metrics["recovery_time"],
-        "num_drops": drift_metrics["num_drops"],
         "time": float(elapsed),
         "curve": np.asarray(accuracies, dtype=float),
         "n_runs": 1,
@@ -260,12 +208,59 @@ def _summarize_run(accuracies, kappas, diversities, elapsed, config, extra=None)
     return summary
 
 
+def _should_reoptimize_event_driven(
+    accuracies,
+    block_index,
+    last_reoptimization_block,
+    config,
+):
+    """
+    Decide si debe ejecutarse el MOEA.
+
+    Modo periódico:
+        Si use_event_reoptimization=False, se usa la lógica antigua:
+        cada reopt_frequency bloques.
+
+    Modo event-driven:
+        Se compara el accuracy actual contra la media de los últimos
+        accuracy_monitor_window bloques. Si la caída supera
+        accuracy_drop_threshold, se reoptimiza.
+    """
+
+    if not config.use_event_reoptimization:
+        return (block_index + 1) % config.reopt_frequency == 0
+
+    if len(accuracies) < config.accuracy_monitor_window + 1:
+        return False
+
+    if last_reoptimization_block is not None:
+        blocks_since_last_reopt = block_index - last_reoptimization_block
+
+        if blocks_since_last_reopt < config.min_blocks_between_reopts:
+            return False
+
+    current_accuracy = float(accuracies[-1])
+
+    previous_accuracies = accuracies[
+        -config.accuracy_monitor_window - 1:-1
+    ]
+    reference_accuracy = _safe_nanmean(previous_accuracies)
+
+    if np.isnan(reference_accuracy):
+        return False
+
+    accuracy_drop = reference_accuracy - current_accuracy
+
+    return accuracy_drop >= config.accuracy_drop_threshold
+
+
 def evaluate_fixed_learnpp(chunks, config):
     model = LearnPPNSE(
         a=config.baseline_a,
         b=config.baseline_b,
         max_size=config.baseline_max_size,
     )
+
     accuracies = []
     kappas = []
     diversities = []
@@ -276,7 +271,9 @@ def evaluate_fixed_learnpp(chunks, config):
 
     for block_index, (X, y) in enumerate(chunks):
         if block_index > 0:
-            accuracy, kappa, diversity = _predict_update_metrics(model, X, y, kappa_metric)
+            accuracy, kappa, diversity = _predict_update_metrics(
+                model, X, y, kappa_metric
+            )
             accuracies.append(accuracy)
             kappas.append(kappa)
             diversities.append(diversity)
@@ -285,12 +282,12 @@ def evaluate_fixed_learnpp(chunks, config):
         model.fit_chunk(X, y)
 
     elapsed = time.perf_counter() - start
+
     return _summarize_run(
         accuracies,
         kappas,
         diversities,
         elapsed,
-        config=config,
         extra={
             "optimization_time": 0.0,
             "stream_time": float(elapsed),
@@ -319,8 +316,9 @@ def optimize_recent_window(recent_chunks, config, block_index):
     )
     elapsed = time.perf_counter() - start
 
-    best_idx, best_x, best_f, best_score = choose_drift_compromise_solution(res)
+    best_idx, best_x, best_f, best_score = choose_compromise_solution(res)
     best_evaluation = problem.get_cached_evaluation(best_x)
+
     selected = {
         "block_index": int(block_index),
         "window_start": int(block_index - len(recent_chunks) + 1),
@@ -328,11 +326,9 @@ def optimize_recent_window(recent_chunks, config, block_index):
         "a": float(best_x[0]),
         "b": float(best_x[1]),
         "max_size": int(round(best_x[2])),
-        "window_recovery_time": float(best_f[0]),
-        "window_accuracy_mean": float(best_evaluation.accuracy),
-        "window_accuracy_min": float(best_evaluation.accuracy_min),
-        "window_cost": float(best_f[2]),
+        "window_recent_accuracy": float(best_evaluation.recent_accuracy),
         "window_diversity": float(best_evaluation.diversity),
+        "window_complexity": float(best_evaluation.complexity),
         "compromise_score": float(best_score),
         "pareto_index": int(best_idx),
         "optimizer_elapsed": float(elapsed),
@@ -349,6 +345,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
         b=config.initial_b,
         max_size=config.initial_max_size,
     )
+
     accuracies = []
     kappas = []
     diversities = []
@@ -358,16 +355,20 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
     pareto_frames = []
     optimization_time = 0.0
     kappa_metric = metrics.CohenKappa()
+    last_reoptimization_block = None
 
     stream_start = time.perf_counter()
 
     for block_index, (X, y) in enumerate(chunks):
         if block_index > 0:
-            accuracy, kappa, diversity = _predict_update_metrics(model, X, y, kappa_metric)
+            accuracy, kappa, diversity = _predict_update_metrics(
+                model, X, y, kappa_metric
+            )
             accuracies.append(accuracy)
             kappas.append(kappa)
             diversities.append(diversity)
             ensemble_sizes.append(len(model.models))
+
             config_curve.append({
                 "block_index": block_index,
                 "a": float(model.a),
@@ -380,14 +381,27 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
 
         has_next_block = block_index < len(chunks) - 1
         has_full_window = block_index + 1 >= config.window_size
-        due_for_reoptimization = (block_index + 1) % config.reopt_frequency == 0
+
+        due_for_reoptimization = _should_reoptimize_event_driven(
+            accuracies=accuracies,
+            block_index=block_index,
+            last_reoptimization_block=last_reoptimization_block,
+            config=config,
+        )
 
         if has_next_block and has_full_window and due_for_reoptimization:
-            recent_chunks = chunks[block_index + 1 - config.window_size:block_index + 1]
-            selected, pareto_df = optimize_recent_window(recent_chunks, config, block_index)
+            recent_chunks = chunks[
+                block_index + 1 - config.window_size:block_index + 1
+            ]
+
+            selected, pareto_df = optimize_recent_window(
+                recent_chunks, config, block_index
+            )
+
             optimization_time += selected["optimizer_elapsed"]
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
+
             _apply_learnpp_config(
                 model,
                 a=selected["a"],
@@ -395,18 +409,27 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
                 max_size=selected["max_size"],
             )
 
+            last_reoptimization_block = block_index
+
             if config.verbose:
+                if config.use_event_reoptimization:
+                    reopt_msg = "Reoptimización event-driven"
+                else:
+                    reopt_msg = "Reoptimización periódica"
+
                 print(
-                    "Reoptimización tras bloque "
+                    f"{reopt_msg} tras bloque "
                     f"{block_index}: a={selected['a']:.4f}, "
                     f"b={selected['b']:.4f}, "
                     f"max_size={selected['max_size']}, "
-                    f"recovery={selected['window_recovery_time']:.2f}, "
-                    f"accuracy_min={selected['window_accuracy_min']:.4f}"
+                    f"recent_accuracy={selected['window_recent_accuracy']:.4f}, "
+                    f"diversity={selected['window_diversity']:.4f}, "
+                    f"complexity={selected['window_complexity']:.2f}"
                 )
 
     total_elapsed = time.perf_counter() - stream_start
     stream_elapsed = max(0.0, total_elapsed - optimization_time)
+
     pareto_history = (
         pd.concat(pareto_frames, ignore_index=True)
         if pareto_frames
@@ -418,7 +441,6 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
         kappas,
         diversities,
         total_elapsed,
-        config=config,
         extra={
             "optimization_time": float(optimization_time),
             "stream_time": float(stream_elapsed),
