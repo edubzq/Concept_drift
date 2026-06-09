@@ -1,3 +1,4 @@
+import copy
 import time
 
 import numpy as np
@@ -13,23 +14,35 @@ from src.optimization.dynamic_config import CandidateEvaluation
 from src.utils.metrics import compute_ensemble_diversity, _safe_nanmean
 
 
-def _evaluation_cache_key(a, b, max_size, cache_decimals):
+def decode_candidate(x, config):
+    return {
+        "a": float(x[0]),
+        "b": float(x[1]),
+    }
+
+
+def _evaluation_cache_key(candidate, cache_decimals):
     return (
-        round(float(a), cache_decimals),
-        round(float(b), cache_decimals),
-        int(max_size),
+        round(float(candidate["a"]), cache_decimals),
+        round(float(candidate["b"]), cache_decimals),
     )
 
 
-def _evaluate_learnpp_config_on_window(chunks, a, b, max_size, config):
-    model = LearnPPNSE(a=float(a), b=float(b), max_size=int(round(max_size)))
+def _evaluate_candidate_on_window(chunks, checkpoints, block_index, candidate, config):
+    window_start = block_index + 1 - config.window_size
+    window_end = block_index + 1
+    window_chunks = chunks[window_start:window_end]
+
+    model = copy.deepcopy(checkpoints[window_start])
+    model.set_config(a=candidate["a"], b=candidate["b"])
+
     accuracies = []
     diversities = []
 
     start = time.perf_counter()
 
-    for block_index, (X, y) in enumerate(chunks):
-        if block_index > 0:
+    for X, y in window_chunks:
+        if model.models:
             preds, base_predictions = model.predict_with_base_predictions(X)
             accuracies.append(float(np.mean(preds == y)))
             diversities.append(
@@ -40,78 +53,57 @@ def _evaluate_learnpp_config_on_window(chunks, a, b, max_size, config):
 
     elapsed = time.perf_counter() - start
 
-    recent_accuracy = _safe_nanmean(accuracies)
-    diversity = _safe_nanmean(diversities)
-
-    if config.use_elapsed_time_objective:
-        complexity = float(elapsed)
-    else:
-        complexity = int(round(max_size)) * max(len(chunks) - 1, 1)
-
     return CandidateEvaluation(
-        recent_accuracy=recent_accuracy,
-        diversity=diversity,
-        complexity=float(complexity),
+        recent_accuracy=_safe_nanmean(accuracies),
+        diversity=_safe_nanmean(diversities),
+        complexity=float(elapsed),
         elapsed=float(elapsed),
     )
 
 
-class DynamicLearnPPNSGAProblem(ElementwiseProblem):
-    def __init__(self, chunks, config):
+class PassiveLearnPPNSGAProblem(ElementwiseProblem):
+    def __init__(self, chunks, checkpoints, block_index, config):
         self.chunks = chunks
+        self.checkpoints = checkpoints
+        self.block_index = block_index
         self.config = config
         self.evaluation_cache = {}
 
         super().__init__(
-            n_var=3,
+            n_var=2,
             n_obj=3,
             n_ieq_constr=0,
-            xl=np.array(
-                [config.a_min, config.b_min, config.max_size_min],
-                dtype=float,
-            ),
-            xu=np.array(
-                [config.a_max, config.b_max, config.max_size_max],
-                dtype=float,
-            ),
+            xl=np.array([config.a_min, config.b_min], dtype=float),
+            xu=np.array([config.a_max, config.b_max], dtype=float),
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
-        a = float(x[0])
-        b = float(x[1])
-        max_size = int(round(x[2]))
-
-        cache_key = _evaluation_cache_key(
-            a, b, max_size, self.config.cache_decimals
-        )
+        candidate = decode_candidate(x, self.config)
+        cache_key = _evaluation_cache_key(candidate, self.config.cache_decimals)
 
         if cache_key not in self.evaluation_cache:
-            self.evaluation_cache[cache_key] = _evaluate_learnpp_config_on_window(
+            self.evaluation_cache[cache_key] = _evaluate_candidate_on_window(
                 self.chunks,
-                a=a,
-                b=b,
-                max_size=max_size,
-                config=self.config,
+                self.checkpoints,
+                self.block_index,
+                candidate,
+                self.config,
             )
 
         evaluation = self.evaluation_cache[cache_key]
 
         out["F"] = np.array(
             [
-                -evaluation.recent_accuracy,  # maximizar precisión reciente
-                -evaluation.diversity,        # maximizar diversidad
-                evaluation.complexity,        # minimizar complejidad
+                -evaluation.recent_accuracy,
+                -evaluation.diversity,
+                evaluation.elapsed,
             ],
             dtype=float,
         )
 
     def get_cached_evaluation(self, x):
-        cache_key = _evaluation_cache_key(
-            float(x[0]),
-            float(x[1]),
-            int(round(x[2])),
-            self.config.cache_decimals,
-        )
+        candidate = decode_candidate(x, self.config)
+        cache_key = _evaluation_cache_key(candidate, self.config.cache_decimals)
         return self.evaluation_cache[cache_key]
 
 
@@ -131,7 +123,7 @@ def choose_compromise_solution(res):
                 values - min_value
             ) / (max_value - min_value)
 
-    # recent_accuracy, diversity, complexity
+    # recent_accuracy, diversity, elapsed_time
     weights = np.array([0.45, 0.35, 0.20], dtype=float)
     score = normalized @ weights
     best_idx = int(np.argmin(score))
@@ -142,17 +134,17 @@ def choose_compromise_solution(res):
 def _pareto_to_df(res, problem, block_index):
     rows = []
 
-    for x, f in zip(np.atleast_2d(res.X), np.atleast_2d(res.F)):
+    for x, _ in zip(np.atleast_2d(res.X), np.atleast_2d(res.F)):
+        candidate = decode_candidate(x, problem.config)
         evaluation = problem.get_cached_evaluation(x)
 
         rows.append({
             "block_index": int(block_index),
-            "a": round(float(x[0]), 4),
-            "b": round(float(x[1]), 4),
-            "max_size": int(round(x[2])),
+            "a": round(candidate["a"], 4),
+            "b": round(candidate["b"], 4),
             "recent_accuracy": round(evaluation.recent_accuracy, 6),
             "diversity": round(evaluation.diversity, 6),
-            "complexity": round(evaluation.complexity, 6),
+            "complexity": round(evaluation.elapsed, 6),
             "evaluation_elapsed": round(evaluation.elapsed, 6),
         })
 
@@ -160,19 +152,6 @@ def _pareto_to_df(res, problem, block_index):
         by=["recent_accuracy", "diversity", "complexity"],
         ascending=[False, False, True],
     ).reset_index(drop=True)
-
-
-def _apply_learnpp_config(model, a, b, max_size):
-    model.a = float(a)
-    model.b = float(b)
-    model.max_size = int(max_size)
-
-    while len(model.models) > model.max_size:
-        model.models.pop(0)
-        model.beta_history.pop(0)
-
-    if model.models:
-        model._refresh_voting_weights()
 
 
 def _predict_update_metrics(model, X, y, kappa_metric):
@@ -206,52 +185,6 @@ def _summarize_run(accuracies, kappas, diversities, elapsed, extra=None):
         summary.update(extra)
 
     return summary
-
-
-def _should_reoptimize_event_driven(
-    accuracies,
-    block_index,
-    last_reoptimization_block,
-    config,
-):
-    """
-    Decide si debe ejecutarse el MOEA.
-
-    Modo periódico:
-        Si use_event_reoptimization=False, se usa la lógica antigua:
-        cada reopt_frequency bloques.
-
-    Modo event-driven:
-        Se compara el accuracy actual contra la media de los últimos
-        accuracy_monitor_window bloques. Si la caída supera
-        accuracy_drop_threshold, se reoptimiza.
-    """
-
-    if not config.use_event_reoptimization:
-        return (block_index + 1) % config.reopt_frequency == 0
-
-    if len(accuracies) < config.accuracy_monitor_window + 1:
-        return False
-
-    if last_reoptimization_block is not None:
-        blocks_since_last_reopt = block_index - last_reoptimization_block
-
-        if blocks_since_last_reopt < config.min_blocks_between_reopts:
-            return False
-
-    current_accuracy = float(accuracies[-1])
-
-    previous_accuracies = accuracies[
-        -config.accuracy_monitor_window - 1:-1
-    ]
-    reference_accuracy = _safe_nanmean(previous_accuracies)
-
-    if np.isnan(reference_accuracy):
-        return False
-
-    accuracy_drop = reference_accuracy - current_accuracy
-
-    return accuracy_drop >= config.accuracy_drop_threshold
 
 
 def evaluate_fixed_learnpp(chunks, config):
@@ -301,8 +234,8 @@ def evaluate_fixed_learnpp(chunks, config):
     )
 
 
-def optimize_recent_window(recent_chunks, config, block_index):
-    problem = DynamicLearnPPNSGAProblem(recent_chunks, config)
+def optimize_recent_window(chunks, checkpoints, config, block_index):
+    problem = PassiveLearnPPNSGAProblem(chunks, checkpoints, block_index, config)
     algorithm = NSGA2(pop_size=config.pop_size)
     termination = get_termination("n_gen", config.n_gen)
 
@@ -316,19 +249,19 @@ def optimize_recent_window(recent_chunks, config, block_index):
     )
     elapsed = time.perf_counter() - start
 
-    best_idx, best_x, best_f, best_score = choose_compromise_solution(res)
+    best_idx, best_x, _, best_score = choose_compromise_solution(res)
+    best_candidate = decode_candidate(best_x, config)
     best_evaluation = problem.get_cached_evaluation(best_x)
 
     selected = {
         "block_index": int(block_index),
-        "window_start": int(block_index - len(recent_chunks) + 1),
+        "window_start": int(block_index + 1 - config.window_size),
         "window_end": int(block_index),
-        "a": float(best_x[0]),
-        "b": float(best_x[1]),
-        "max_size": int(round(best_x[2])),
+        "a": float(best_candidate["a"]),
+        "b": float(best_candidate["b"]),
         "window_recent_accuracy": float(best_evaluation.recent_accuracy),
         "window_diversity": float(best_evaluation.diversity),
-        "window_complexity": float(best_evaluation.complexity),
+        "window_complexity": float(best_evaluation.elapsed),
         "compromise_score": float(best_score),
         "pareto_index": int(best_idx),
         "optimizer_elapsed": float(elapsed),
@@ -343,7 +276,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
     model = LearnPPNSE(
         a=config.initial_a,
         b=config.initial_b,
-        max_size=config.initial_max_size,
+        max_size=config.max_size,
     )
 
     accuracies = []
@@ -353,13 +286,15 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
     config_curve = []
     reoptimization_rows = []
     pareto_frames = []
+    checkpoints = []
     optimization_time = 0.0
     kappa_metric = metrics.CohenKappa()
-    last_reoptimization_block = None
 
     stream_start = time.perf_counter()
 
     for block_index, (X, y) in enumerate(chunks):
+        checkpoints.append(copy.deepcopy(model))
+
         if block_index > 0:
             accuracy, kappa, diversity = _predict_update_metrics(
                 model, X, y, kappa_metric
@@ -382,49 +317,28 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
         has_next_block = block_index < len(chunks) - 1
         has_full_window = block_index + 1 >= config.window_size
 
-        due_for_reoptimization = _should_reoptimize_event_driven(
-            accuracies=accuracies,
-            block_index=block_index,
-            last_reoptimization_block=last_reoptimization_block,
-            config=config,
-        )
-
-        if has_next_block and has_full_window and due_for_reoptimization:
-            recent_chunks = chunks[
-                block_index + 1 - config.window_size:block_index + 1
-            ]
-
+        if has_next_block and has_full_window:
             selected, pareto_df = optimize_recent_window(
-                recent_chunks, config, block_index
+                chunks=chunks,
+                checkpoints=checkpoints,
+                config=config,
+                block_index=block_index,
             )
 
             optimization_time += selected["optimizer_elapsed"]
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
 
-            _apply_learnpp_config(
-                model,
-                a=selected["a"],
-                b=selected["b"],
-                max_size=selected["max_size"],
-            )
-
-            last_reoptimization_block = block_index
+            model.set_config(a=selected["a"], b=selected["b"])
 
             if config.verbose:
-                if config.use_event_reoptimization:
-                    reopt_msg = "Reoptimización event-driven"
-                else:
-                    reopt_msg = "Reoptimización periódica"
-
                 print(
-                    f"{reopt_msg} tras bloque "
-                    f"{block_index}: a={selected['a']:.4f}, "
+                    f"Reoptimización pasiva tras bloque {block_index}: "
+                    f"a={selected['a']:.4f}, "
                     f"b={selected['b']:.4f}, "
-                    f"max_size={selected['max_size']}, "
                     f"recent_accuracy={selected['window_recent_accuracy']:.4f}, "
                     f"diversity={selected['window_diversity']:.4f}, "
-                    f"complexity={selected['window_complexity']:.2f}"
+                    f"elapsed={selected['window_complexity']:.6f}s"
                 )
 
     total_elapsed = time.perf_counter() - stream_start

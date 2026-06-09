@@ -66,10 +66,7 @@ def _write_dataset(
 
 
 def generate_abrupt(cfg: DriftDatasetConfig) -> str:
-    """
-    Drift abrupto: mitad inicial con concepto A, mitad final con concepto B.
-    """
-
+    
     concept_a, concept_b = 0, 2
 
     concepts = [concept_a] * (cfg.n_blocks // 2) + [concept_b] * (cfg.n_blocks - cfg.n_blocks // 2)
@@ -82,20 +79,13 @@ def generate_abrupt(cfg: DriftDatasetConfig) -> str:
 
 
 def generate_gradual(cfg: DriftDatasetConfig) -> str:
-    """
-    Drift gradual (mejorado):
-    - Antes de la zona de transición: todo concepto A
-    - Zona de transición: mezcla A/B por probabilidad
-      * parte entre-bloques (global)
-      * parte intra-bloque (dentro del chunk)
-    - Después de la transición: todo concepto B
-    """
+  
     os.makedirs(cfg.output_dir, exist_ok=True)
     rng = np.random.default_rng(cfg.seed)
 
     concept_a, concept_b = 0, 2
 
-    # Ventana de transición sobre bloques (puedes ajustarla para el TFG)
+    # Ventana de transición sobre bloques
     start_transition_block = 12
     end_transition_block = 28
 
@@ -114,7 +104,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
             # Fase estable A
             if block_idx < start_transition_block:
                 x, y, concept = x_a, y_a, concept_a
-            # Fase de transición (global + intra-bloque)
+            # Fase de transición
             elif start_transition_block <= block_idx < end_transition_block:
                 alpha_block = (block_idx - start_transition_block) / (
                     end_transition_block - start_transition_block
@@ -147,10 +137,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
 
 
 def generate_recurrent(cfg: DriftDatasetConfig) -> str:
-    """
-    Drift recurrente: alternancia A/B por periodos de bloques.
-    Patrón largo para simular reaparición de conceptos.
-    """
+
     concept_a, concept_b = 0, 2
 
     pattern = (
@@ -201,7 +188,7 @@ def main() -> None:
     for path in [abrupt_path, gradual_path, recurrent_path]:
         _quick_validate(path, cfg)
 
-    print("✅ Generación completada y validada para abrupt, gradual y recurrent.")
+    print("Generación completada y validada para abrupt, gradual y recurrent.")
 
 
 if __name__ == "__main__":

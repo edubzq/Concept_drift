@@ -26,19 +26,6 @@ def _summary_to_df(results, dataset_name, config):
             "dataset": dataset_name,
             "model": model_name,
             "window_size": config.window_size if is_moea else np.nan,
-            "reopt_frequency": config.reopt_frequency if is_moea else np.nan,
-            "use_event_reoptimization": (
-                config.use_event_reoptimization if is_moea else np.nan
-            ),
-            "accuracy_monitor_window": (
-                config.accuracy_monitor_window if is_moea else np.nan
-            ),
-            "accuracy_drop_threshold": (
-                config.accuracy_drop_threshold if is_moea else np.nan
-            ),
-            "min_blocks_between_reopts": (
-                config.min_blocks_between_reopts if is_moea else np.nan
-            ),
             "pop_size": config.pop_size if is_moea else np.nan,
             "n_gen": config.n_gen if is_moea else np.nan,
             "accuracy_mean": summary["accuracy_mean"],
@@ -79,7 +66,7 @@ def _curves_to_df(results):
 
 
 def _print_comparison(summary_df):
-    print("\n=== Comparación Learn++NSE fijo vs Learn++NSE + MOEA dinámico ===")
+    print("\n=== Comparación Learn++NSE fijo vs Learn++NSE + MOEA pasivo ===")
 
     printable_cols = [
         "model",
@@ -114,29 +101,19 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     if config.verbose:
         print(f"Dataset: {config.dataset_path}")
         print(f"Bloques: {len(chunks)}")
-        print(f"Ventana dinámica: {config.window_size} bloques")
-
-        if config.use_event_reoptimization:
-            print("Reoptimización: event-driven")
-            print(
-                "Criterio: accuracy actual cae al menos "
-                f"{config.accuracy_drop_threshold:.4f} respecto a la media "
-                f"de los {config.accuracy_monitor_window} bloques anteriores"
-            )
-            print(
-                "Cooldown entre reoptimizaciones: "
-                f"{config.min_blocks_between_reopts} bloques"
-            )
-        else:
-            print(
-                "Reoptimización: periódica cada "
-                f"{config.reopt_frequency} bloques"
-            )
-
+        print("Reoptimización: pasiva")
+        print("Criterio: se ejecuta en cada bloque con ventana completa")
+        print("Detector de drift: no se usa")
+        print(f"Ventana fija: {config.window_size} bloques")
+        print(f"max_size fijo del MOEA pasivo: {config.max_size}")
         print(f"NSGA-II: pop_size={config.pop_size}, n_gen={config.n_gen}")
         print(
             "Objetivos MOEA: maximizar recent_accuracy y diversity; "
-            "minimizar complexity"
+            "minimizar tiempo de ejecución"
+        )
+        print(
+            "Evaluación de candidatos: desde checkpoints del ensemble real "
+            "anteriores a la ventana fija."
         )
 
     baseline = evaluate_fixed_learnpp(chunks, config)
@@ -144,7 +121,7 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
 
     results = {
         "Learn++NSE fijo": baseline,
-        "Learn++NSE + MOEA dinámico": dynamic,
+        "Learn++NSE + MOEA pasivo": dynamic,
     }
 
     os.makedirs(config.output_dir, exist_ok=True)
@@ -170,24 +147,7 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     )
     config_curve_path = os.path.join(
         config.output_dir,
-        f"dynamic_moea_{dataset_name}_config_curve.csv",
     )
-
-    summary_df.to_csv(summary_path, index=False)
-    curves_df.to_csv(curves_path, index=False)
-    dynamic["reoptimizations"].to_csv(reopt_path, index=False)
-    dynamic["pareto_history"].to_csv(pareto_path, index=False)
-    dynamic["config_curve"].to_csv(config_curve_path, index=False)
-
-    plot_results(
-        {
-            name: {"curve": summary["curve"], "n_runs": 1}
-            for name, summary in results.items()
-        },
-        title=f"dynamic_moea_{dataset_name}",
-        plots_dir=config.plots_dir,
-    )
-
     if config.verbose:
         _print_comparison(summary_df)
         print("\nArchivos guardados:")
@@ -213,21 +173,20 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Learn++NSE fijo vs Learn++NSE con MOEA dinámico "
-            "orientado a precisión reciente, diversidad y complejidad."
+            "Learn++NSE fijo vs Learn++NSE con MOEA pasivo "
+            "orientado a precisión reciente, diversidad y tiempo de ejecución."
         )
     )
 
     parser.add_argument("--dataset", default=DynamicMOEAConfig.dataset_path)
     parser.add_argument("--window-size", type=int, default=DynamicMOEAConfig.window_size)
-    parser.add_argument("--reopt-frequency", type=int, default=DynamicMOEAConfig.reopt_frequency)
     parser.add_argument("--pop-size", type=int, default=DynamicMOEAConfig.pop_size)
     parser.add_argument("--n-gen", type=int, default=DynamicMOEAConfig.n_gen)
     parser.add_argument("--seed", type=int, default=DynamicMOEAConfig.seed)
 
     parser.add_argument("--initial-a", type=float, default=DynamicMOEAConfig.initial_a)
     parser.add_argument("--initial-b", type=float, default=DynamicMOEAConfig.initial_b)
-    parser.add_argument("--initial-max-size", type=int, default=DynamicMOEAConfig.initial_max_size)
+    parser.add_argument("--max-size", type=int, default=DynamicMOEAConfig.max_size)
 
     parser.add_argument("--baseline-a", type=float, default=DynamicMOEAConfig.baseline_a)
     parser.add_argument("--baseline-b", type=float, default=DynamicMOEAConfig.baseline_b)
@@ -237,44 +196,9 @@ def parse_args():
     parser.add_argument("--a-max", type=float, default=DynamicMOEAConfig.a_max)
     parser.add_argument("--b-min", type=float, default=DynamicMOEAConfig.b_min)
     parser.add_argument("--b-max", type=float, default=DynamicMOEAConfig.b_max)
-    parser.add_argument("--max-size-min", type=int, default=DynamicMOEAConfig.max_size_min)
-    parser.add_argument("--max-size-max", type=int, default=DynamicMOEAConfig.max_size_max)
-
-    parser.add_argument(
-        "--periodic-reoptimization",
-        action="store_true",
-        help=(
-            "Desactiva la reoptimización event-driven y usa la lógica antigua "
-            "cada reopt_frequency bloques."
-        ),
-    )
-    parser.add_argument(
-        "--accuracy-drop-threshold",
-        type=float,
-        default=DynamicMOEAConfig.accuracy_drop_threshold,
-        help="Caída mínima de accuracy para activar el MOEA.",
-    )
-    parser.add_argument(
-        "--accuracy-monitor-window",
-        type=int,
-        default=DynamicMOEAConfig.accuracy_monitor_window,
-        help="Número de bloques anteriores usados como referencia.",
-    )
-    parser.add_argument(
-        "--min-blocks-between-reopts",
-        type=int,
-        default=DynamicMOEAConfig.min_blocks_between_reopts,
-        help="Mínimo de bloques entre dos reoptimizaciones.",
-    )
 
     parser.add_argument("--output-dir", default=DynamicMOEAConfig.output_dir)
     parser.add_argument("--plots-dir", default=DynamicMOEAConfig.plots_dir)
-
-    parser.add_argument(
-        "--use-elapsed-time-objective",
-        action="store_true",
-        help="Usa tiempo real como objetivo de complejidad.",
-    )
     parser.add_argument(
         "--quiet",
         action="store_true",
@@ -290,17 +214,12 @@ def main():
     config = DynamicMOEAConfig(
         dataset_path=args.dataset,
         window_size=args.window_size,
-        reopt_frequency=args.reopt_frequency,
-        use_event_reoptimization=not args.periodic_reoptimization,
-        accuracy_drop_threshold=args.accuracy_drop_threshold,
-        accuracy_monitor_window=args.accuracy_monitor_window,
-        min_blocks_between_reopts=args.min_blocks_between_reopts,
         pop_size=args.pop_size,
         n_gen=args.n_gen,
         seed=args.seed,
         initial_a=args.initial_a,
         initial_b=args.initial_b,
-        initial_max_size=args.initial_max_size,
+        max_size=args.max_size,
         baseline_a=args.baseline_a,
         baseline_b=args.baseline_b,
         baseline_max_size=args.baseline_max_size,
@@ -308,9 +227,6 @@ def main():
         a_max=args.a_max,
         b_min=args.b_min,
         b_max=args.b_max,
-        max_size_min=args.max_size_min,
-        max_size_max=args.max_size_max,
-        use_elapsed_time_objective=args.use_elapsed_time_objective,
         output_dir=args.output_dir,
         plots_dir=args.plots_dir,
         verbose=not args.quiet,
