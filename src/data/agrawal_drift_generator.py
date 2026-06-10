@@ -67,7 +67,7 @@ def _write_dataset(
 
 def generate_abrupt(cfg: DriftDatasetConfig) -> str:
     
-    concept_a, concept_b = 0, 2
+    concept_a, concept_b = 3, 2
 
     concepts = [concept_a] * (cfg.n_blocks // 2) + [concept_b] * (cfg.n_blocks - cfg.n_blocks // 2)
     generators = [
@@ -83,7 +83,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
     os.makedirs(cfg.output_dir, exist_ok=True)
     rng = np.random.default_rng(cfg.seed)
 
-    concept_a, concept_b = 0, 2
+    concept_a, concept_b = 3, 2
 
     # Ventana de transición sobre bloques
     start_transition_block = 12
@@ -138,15 +138,13 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
 
 def generate_recurrent(cfg: DriftDatasetConfig) -> str:
 
-    concept_a, concept_b = 0, 2
+    concept_a, concept_b = 3, 2
 
     pattern = (
         [concept_a] * 8
         + [concept_b] * 8
-        + [concept_a] * 4
-        + [concept_b] * 4
-        + [concept_a] * 3
-        + [concept_b] * 3
+        + [concept_a] * 7
+        + [concept_b] * 7
         + [concept_a] * 5
         + [concept_b] * 5
 
