@@ -8,6 +8,30 @@ def _drift_markers(title):
     """Devuelve marcadores de drift para los escenarios Agrawal conocidos."""
     normalized = title.lower()
 
+    if "real_concept" in normalized or "real concept" in normalized:
+        if "gradual" in normalized:
+            return {
+                "spans": [(11, 30, "Transición gradual")],
+                "lines": [],
+            }
+
+        if "abrupt" in normalized:
+            return {
+                "spans": [],
+                "lines": [(21, "Drift abrupto")],
+            }
+
+        if "recurrent" in normalized:
+            return {
+                "spans": [
+                    (9, 14, "Drift recurrente"),
+                    (19, 24, None),
+                    (29, 34, None),
+                ],
+                "lines": [],
+            }
+
+
     if "gradual" in normalized:
         return {
             "spans": [(13, 28, "Transición gradual")],
