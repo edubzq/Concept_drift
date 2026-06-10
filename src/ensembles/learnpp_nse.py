@@ -3,16 +3,26 @@ from river import tree
 
 
 class LearnPPNSE:
-
-    def __init__(self, a=0.5, b=5, max_size=20, pruning_strategy=0):
+    def __init__(self, a=0.5, b=5, max_size=20):
         self.models = []
         self.beta_history = []
         self.voting_weights = []
         self.a = a
         self.b = b
         self.max_size = max_size
-        self.pruning_strategy = int(pruning_strategy)
         self.classes_ = None
+
+    # -------------------------------------------------
+    # Configuración dinámica
+    # -------------------------------------------------
+    def set_config(self, a=None, b=None):
+        if a is not None:
+            self.a = float(a)
+        if b is not None:
+            self.b = float(b)
+
+        if self.models:
+            self._refresh_voting_weights()
 
     # -------------------------------------------------
     # Utilidades internas de predicción
@@ -69,57 +79,6 @@ class LearnPPNSE:
 
             self.voting_weights.append(weight)
 
-    def _choose_pruning_index(self, base_predictions=None, y=None):
-        """Selecciona qué clasificador eliminar según self.pruning_strategy."""
-        if len(self.models) == 0:
-            raise ValueError("No se puede podar un ensemble vacío.")
-
-        if self.pruning_strategy == 1:
-            if len(self.voting_weights) == len(self.models):
-                return int(np.argmin(self.voting_weights))
-            return 0
-
-        if self.pruning_strategy == 2:
-            if base_predictions is not None and y is not None:
-                accuracies = np.mean(
-                    base_predictions == np.asarray(y, dtype=object),
-                    axis=1,
-                )
-                return int(np.argmin(accuracies))
-            return 0
-
-        return 0
-
-    def _remove_model(self, index):
-        del self.models[index]
-        del self.beta_history[index]
-        if len(self.voting_weights) > index:
-            del self.voting_weights[index]
-
-    def prune_to_max_size(self, X=None, y=None):
-        """Aplica pruning hasta cumplir max_size usando datos etiquetados opcionales."""
-        base_predictions = None
-        y_array = None
-
-        if X is not None and y is not None and len(self.models) > 0:
-            X_records = X.to_dict(orient="records")
-            y_array = np.asarray(y, dtype=object)
-            base_predictions = self._predict_base_matrix_from_records(X_records)
-
-        self._refresh_voting_weights()
-
-        while len(self.models) > self.max_size:
-            remove_index = self._choose_pruning_index(base_predictions, y_array)
-            self._remove_model(remove_index)
-            if base_predictions is not None:
-                base_predictions = np.delete(base_predictions, remove_index, axis=0)
-
-        if self.models:
-            self._refresh_voting_weights()
-
-    # -------------------------------------------------
-    # Entrenamiento por chunk
-    # -------------------------------------------------
     def fit_chunk(self, X, y):
         X_records = X.to_dict(orient="records")
         y_array = np.asarray(y, dtype=object)
@@ -135,7 +94,7 @@ class LearnPPNSE:
         else:
             old_base_predictions = np.empty((0, len(X_records)), dtype=object)
             ensemble_predictions = None
-            E_t = 0.5  # inicialización razonable
+            E_t = 0.5
 
         # ---------------------------------------------
         # 2. Construir distribución D_t
@@ -143,7 +102,11 @@ class LearnPPNSE:
         if ensemble_predictions is None:
             weights = np.ones(len(y_array), dtype=float)
         else:
-            weights = np.where(ensemble_predictions == y_array, E_t, 1.0).astype(float)
+            weights = np.where(
+                ensemble_predictions == y_array,
+                E_t,
+                1.0
+            ).astype(float)
 
         D_t = weights / (weights.sum() + 1e-10)
 
@@ -158,40 +121,44 @@ class LearnPPNSE:
         self.models.append(new_model)
         self.beta_history.append([])
 
-        # Reutilizamos las predicciones de los modelos antiguos y solo calculamos
-        # las del clasificador recién entrenado.
+        # Predicciones del nuevo modelo
         new_model_predictions = np.array(
             [new_model.predict_one(xi) for xi in X_records],
             dtype=object,
         ).reshape(1, -1)
-        all_base_predictions = np.vstack([old_base_predictions, new_model_predictions])
+
+        all_base_predictions = np.vstack([
+            old_base_predictions,
+            new_model_predictions,
+        ])
 
         if self.classes_ is None:
             self.classes_ = np.unique(y_array)
 
         # ---------------------------------------------
-        # 4. Evaluar TODOS los modelos con D_t
+        # 4. Evaluar todos los modelos con D_t
         # ---------------------------------------------
         for k, model_predictions in enumerate(all_base_predictions):
             incorrect = model_predictions != y_array
             error = float(np.dot(D_t, incorrect))
 
-            # clipping como en el paper
             error = max(min(error, 0.5), 1e-6)
-
             beta = error / (1 - error + 1e-10)
 
             self.beta_history[k].append(beta)
 
         # ---------------------------------------------
-        # 5. Voting weights y pruning guiado por cromosoma
+        # 5. Recalcular pesos y podar si supera max_size
         # ---------------------------------------------
         self._refresh_voting_weights()
 
         while len(self.models) > self.max_size:
-            remove_index = self._choose_pruning_index(all_base_predictions, y_array)
-            self._remove_model(remove_index)
-            all_base_predictions = np.delete(all_base_predictions, remove_index, axis=0)
+            # Poda simple: eliminar el modelo más antiguo
+            del self.models[0]
+            del self.beta_history[0]
+
+            if self.voting_weights:
+                del self.voting_weights[0]
 
         if self.models:
             self._refresh_voting_weights()
