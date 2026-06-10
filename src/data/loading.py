@@ -21,6 +21,14 @@ DEFAULT_METADATA_COLUMNS = {
     "scenario",
     "base_concept",
     "chunk_size",
+        # Metadata de los datasets de real concept drift. Son útiles para auditar
+    # la generación, pero no deben entrar en X porque revelarían información
+    # experimental/oráculo sobre dónde y con qué intensidad se aplicó el drift.
+    "concept_drift_affected",
+    "concept_drift_flipped",
+    "flip_probability",
+    "salary_threshold",
+    "loan_threshold",
 }
 
 

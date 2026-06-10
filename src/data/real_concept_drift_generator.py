@@ -136,8 +136,7 @@ def build_abrupt_probabilities(cfg: DriftDatasetConfig) -> np.ndarray:
 
     probs = np.zeros(cfg.total_samples, dtype=float)
 
-    # 20 bloques * 500 filas = 10_000
-    start_index = 10_000
+    start_index = cfg.total_samples // 2
     probs[start_index:] = cfg.max_flip_prob
 
     return probs
@@ -154,8 +153,8 @@ def build_gradual_probabilities(cfg: DriftDatasetConfig) -> np.ndarray:
 
     probs = np.zeros(cfg.total_samples, dtype=float)
 
-    start = 5_000    # inicio bloque 11
-    end = 15_000     # inicio bloque 31
+    start = cfg.total_samples // 4
+    end = 3 * cfg.total_samples // 4
 
     for idx in range(cfg.total_samples):
         if idx < start:
@@ -231,6 +230,8 @@ def apply_probabilistic_real_concept_drift(
 
     drifted = df.copy()
     rng = np.random.default_rng(seed)
+
+ 
 
     affected_mask = affected_subpopulation_mask(
         drifted,
