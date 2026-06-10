@@ -111,9 +111,9 @@ def generate_abrupt(cfg: DriftDatasetConfig) -> str:
             method="inject_feature_drift",
             params={
                 "feature_cols": ["salary", "age", "loan"],
-                "drift_type": "gaussian_noise",
-                "drift_magnitude": 0.05,
-                "start_index": 10_000,
+                "drift_type": "shift",
+                "drift_magnitude": 0.5,
+                "start_index": 8_000,
             },
         )
     ]
@@ -145,21 +145,25 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
             method="inject_feature_drift_gradual",
             params={
                 "feature_cols": ["salary", "age", "loan"],
-                "drift_type": "gaussian_noise",
-                "drift_magnitude": 0.05,
+                "drift_type": "shift",
+                "drift_magnitude": 0.5,
                 "start_index": 6_000,
                 "end_index": 14_000,
-
-                # Ojo: en el método gradual, center y width se aplican sobre
-                # las filas seleccionadas por start_index/end_index.
-                # Aquí seleccionamos 8_000 filas, así que center=4_000
-                # queda en el centro de la transición.
                 "center": 4_000,
                 "width": 8_000,
-                "profile": "sigmoid",
-                "speed_k": 0.7,
+                "profile": "linear",
+                "speed_k": 0.5,
             },
-        )
+        ),
+        DriftConfig(
+            method="inject_feature_drift",
+            params={
+                "feature_cols": ["salary", "age", "loan"],
+                "drift_type": "shift",
+                "drift_magnitude": 0.5,
+                "start_index": 14_000,
+            },
+        ),
     ]
 
     return _write_dataset(
@@ -183,12 +187,12 @@ def generate_recurrent(cfg: DriftDatasetConfig) -> str:
             method="inject_feature_drift_recurrent",
             params={
                 "feature_cols": ["salary", "loan", "age"],
-                "drift_type": "gaussian_noise",
-                "drift_magnitude": 0.04,
+                "drift_type": "shift",
+                "drift_magnitude": 0.5,
                 "start_index": 0,
                 "repeats": 4,
                 "profile": "cosine",
-                "speed_k": 0.7,
+                "speed_k": 0.6,
             },
         )
     ]

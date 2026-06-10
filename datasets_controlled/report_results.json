@@ -1,6 +1,6 @@
 {
   "generator_name": "SyntheticBlockGenerator_Drifted_feature_drift",
-  "generation_timestamp": "2026-06-10T15:15:05.076465",
+  "generation_timestamp": "2026-06-10T16:56:50.343521",
   "real_rows": 20000,
   "synthetic_rows": 20000,
   "quality_scores": {

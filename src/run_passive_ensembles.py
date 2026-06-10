@@ -1,5 +1,8 @@
+import argparse
+import fnmatch
 import os
 import time
+
 import numpy as np
 import pandas as pd
 
@@ -20,8 +23,10 @@ from src.utils.metrics import (
 from src.utils.plotting import plot_results
 
 
-DATASET_DIR = "datasets"
+DATASET_DIR = "datasets_controlled"
 RESULTS_CSV = "results/results_summary.csv"
+PLOTS_DIR = "plots"
+DATASET_PATTERN = "agrawal_*.csv"
 
 N_RUNS = 1
 ENSEMBLE_SIZE = 20
@@ -172,7 +177,7 @@ def print_results(results, dataset_name):
         print(f"  Num drops          : {m['num_drops_mean']:.0f} ± {m['num_drops_std']:.2f}")
 
 
-def run_experiment(dataset_path):
+def run_experiment(dataset_path, plots_dir=PLOTS_DIR):
     chunks = load_blocks(dataset_path)
 
     models = {
@@ -190,23 +195,35 @@ def run_experiment(dataset_path):
 
     dataset_name = os.path.basename(dataset_path).replace(".csv", "")
 
-    plot_results(results, dataset_name, plots_dir="plots")
+    plot_results(results, dataset_name, plots_dir=plots_dir)
     print_results(results, dataset_name)
 
     return results
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Evalúa ensembles pasivos sobre datasets Agrawal por bloques."
+    )
+    parser.add_argument("--dataset-dir", default=DATASET_DIR)
+    parser.add_argument("--results-csv", default=RESULTS_CSV)
+    parser.add_argument("--plots-dir", default=PLOTS_DIR)
+    parser.add_argument("--dataset-pattern", default=DATASET_PATTERN)
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     all_results = {}
 
-    for file in sorted(os.listdir(DATASET_DIR)):
-        if file.endswith(".csv"):
-            dataset_path = os.path.join(DATASET_DIR, file)
-            results = run_experiment(dataset_path)
+    for file in sorted(os.listdir(args.dataset_dir)):
+        if file.endswith(".csv") and fnmatch.fnmatch(file, args.dataset_pattern):
+            dataset_path = os.path.join(args.dataset_dir, file)
+            results = run_experiment(dataset_path, plots_dir=args.plots_dir)
             all_results[file] = results
 
-    save_results_csv(all_results, RESULTS_CSV)
-    print(f"\nResumen guardado en: {RESULTS_CSV}")
+    save_results_csv(all_results, args.results_csv)
+    print(f"\nResumen guardado en: {args.results_csv}")
 
 
 if __name__ == "__main__":
