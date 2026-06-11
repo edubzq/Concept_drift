@@ -11,6 +11,51 @@ from river.datasets import synth
 from calm_data_generator.generators.stream.StreamBlockGenerator import (
     SyntheticBlockGenerator,
 )
+def agrawal_2_suave(x):
+    age = x["age"]
+    elevel = x["elevel"]
+
+    if age < 40:
+        # En la función 0 todos los menores de 40 eran clase 1.
+        # Aquí solo dejamos fuera el nivel educativo 4.
+        return int(elevel in [0, 1, 2, 3])
+
+    elif age < 60:
+        # En la función 0 este grupo era clase 0.
+        # Aquí solo algunos casos pasan a clase 1.
+        return int(elevel == 2)
+
+    else:
+        # En la función 0 todos los mayores de 60 eran clase 1.
+        # Aquí solo dejamos fuera el nivel educativo 0.
+        return int(elevel in [1, 2, 3, 4])
+
+def classification_fuction(x: dict) -> int:
+    age = x["age"]
+    elevel = x["elevel"]
+
+    if age < 40:
+        # En la función 0 todos los menores de 40 eran clase 1.
+        # Aquí solo dejamos fuera el nivel educativo 4.
+        return int(elevel in [0, 1, 2, 3])
+
+    elif age < 60:
+        # En la función 0 este grupo era clase 0.
+        # Aquí solo algunos casos pasan a clase 1.
+        return int(elevel in [1,2])
+
+    else:
+        # En la función 0 todos los mayores de 60 eran clase 1.
+        # Aquí solo dejamos fuera el nivel educativo 0.
+        return int(elevel in [1, 2, 3, 4])
+
+
+def replace_concept_b_targets(df: pd.DataFrame, concept_b: int = 2) -> pd.DataFrame:
+    concept_b_mask = df["concept"] == concept_b
+    df.loc[concept_b_mask, "target"] = df.loc[concept_b_mask].apply(
+        classification_fuction, axis=1
+    )
+    return df
 
 
 @dataclass(frozen=True)
@@ -59,6 +104,7 @@ def _write_dataset(
     # block generado por SyntheticBlockGenerator empieza en 1
     concept_by_block = {block_idx + 1: concept for block_idx, concept in enumerate(concepts)}
     df["concept"] = df["block"].map(concept_by_block).astype(int)
+    replace_concept_b_targets(df)
     df.to_csv(path, index=False)
 
     print(f"Dataset generado: {path} ({len(df)} filas, {cfg.n_blocks} bloques)")
@@ -67,7 +113,7 @@ def _write_dataset(
 
 def generate_abrupt(cfg: DriftDatasetConfig) -> str:
     
-    concept_a, concept_b = 3, 2
+    concept_a, concept_b = 0, 2
 
     concepts = [concept_a] * (cfg.n_blocks // 2) + [concept_b] * (cfg.n_blocks - cfg.n_blocks // 2)
     generators = [
@@ -83,7 +129,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
     os.makedirs(cfg.output_dir, exist_ok=True)
     rng = np.random.default_rng(cfg.seed)
 
-    concept_a, concept_b = 3, 2
+    concept_a, concept_b = 0, 2
 
     # Ventana de transición sobre bloques
     start_transition_block = 12
@@ -129,6 +175,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
             rows.append(row)
 
     df = pd.DataFrame(rows)
+    replace_concept_b_targets(df)
     path = os.path.join(cfg.output_dir, "agrawal_gradual.csv")
     df.to_csv(path, index=False)
 
@@ -138,7 +185,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
 
 def generate_recurrent(cfg: DriftDatasetConfig) -> str:
 
-    concept_a, concept_b = 3, 2
+    concept_a, concept_b = 0, 2
 
     pattern = (
         [concept_a] * 8
