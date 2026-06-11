@@ -124,7 +124,7 @@ def choose_compromise_solution(res):
             ) / (max_value - min_value)
 
     # recent_accuracy, diversity, elapsed_time
-    weights = np.array([0.45, 0.35, 0.20], dtype=float)
+    weights = np.array([0.45, 0.40, 0.15], dtype=float)
     score = normalized @ weights
     best_idx = int(np.argmin(score))
 

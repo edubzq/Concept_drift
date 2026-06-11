@@ -14,6 +14,22 @@ class LearnPPNSE:
         self.pruning_strategy = int(pruning_strategy)
         self.classes_ = None
 
+    def set_config(self, a=None, b=None, max_size=None, pruning_strategy=None):
+        """Actualiza la configuración del ensemble sin reiniciar su historial."""
+        if a is not None:
+            self.a = float(a)
+        if b is not None:
+            self.b = float(b)
+        if max_size is not None:
+            self.max_size = int(max_size)
+        if pruning_strategy is not None:
+            self.pruning_strategy = int(pruning_strategy)
+
+        if len(self.models) > self.max_size:
+            self.prune_to_max_size()
+        elif self.models:
+            self._refresh_voting_weights()
+
     # -------------------------------------------------
     # Utilidades internas de predicción
     # -------------------------------------------------

@@ -11,49 +11,32 @@ from river.datasets import synth
 from calm_data_generator.generators.stream.StreamBlockGenerator import (
     SyntheticBlockGenerator,
 )
-def agrawal_2_suave(x):
+
+
+def classification_function(x: dict) -> int:
     age = x["age"]
     elevel = x["elevel"]
 
     if age < 40:
-        # En la función 0 todos los menores de 40 eran clase 1.
-        # Aquí solo dejamos fuera el nivel educativo 4.
-        return int(elevel in [0, 1, 2, 3])
+        # En función 0 todos los menores de 40 eran clase 1.
+        # Ahora excluimos dos niveles educativos, no solo uno.
+        return int(elevel in [0, 1, 2])
 
     elif age < 60:
-        # En la función 0 este grupo era clase 0.
-        # Aquí solo algunos casos pasan a clase 1.
-        return int(elevel == 2)
+        # En función 0 este grupo era clase 0.
+        # Ahora algunos casos pasan a clase 1.
+        return int(elevel in [1, 2])
 
     else:
-        # En la función 0 todos los mayores de 60 eran clase 1.
-        # Aquí solo dejamos fuera el nivel educativo 0.
-        return int(elevel in [1, 2, 3, 4])
-
-def classification_fuction(x: dict) -> int:
-    age = x["age"]
-    elevel = x["elevel"]
-
-    if age < 40:
-        # En la función 0 todos los menores de 40 eran clase 1.
-        # Aquí solo dejamos fuera el nivel educativo 4.
-        return int(elevel in [0, 1, 2, 3])
-
-    elif age < 60:
-        # En la función 0 este grupo era clase 0.
-        # Aquí solo algunos casos pasan a clase 1.
-        return int(elevel in [1,2])
-
-    else:
-        # En la función 0 todos los mayores de 60 eran clase 1.
-        # Aquí solo dejamos fuera el nivel educativo 0.
-        return int(elevel in [1, 2, 3, 4])
+        # En función 0 todos los mayores de 60 eran clase 1.
+        # Ahora excluimos dos niveles educativos.
+        return int(elevel in [2, 3, 4])
 
 
 def replace_concept_b_targets(df: pd.DataFrame, concept_b: int = 2) -> pd.DataFrame:
     concept_b_mask = df["concept"] == concept_b
     df.loc[concept_b_mask, "target"] = df.loc[concept_b_mask].apply(
-        classification_fuction, axis=1
+        classification_function, axis=1
     )
     return df
 
@@ -61,7 +44,7 @@ def replace_concept_b_targets(df: pd.DataFrame, concept_b: int = 2) -> pd.DataFr
 @dataclass(frozen=True)
 class DriftDatasetConfig:
     output_dir: str = "datasets"
-    total_samples: int = 20_000
+    total_samples: int = 30_000
     chunk_size: int = 500
     seed: int = 42
 
@@ -114,8 +97,8 @@ def _write_dataset(
 def generate_abrupt(cfg: DriftDatasetConfig) -> str:
     
     concept_a, concept_b = 0, 2
-
-    concepts = [concept_a] * (cfg.n_blocks // 2) + [concept_b] * (cfg.n_blocks - cfg.n_blocks // 2)
+    drift_start = 20
+    concepts = [concept_a] * drift_start + [concept_b] * (cfg.n_blocks - drift_start)
     generators = [
         synth.Agrawal(classification_function=concept, seed=cfg.seed + i)
         for i, concept in enumerate(concepts)
@@ -132,8 +115,8 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
     concept_a, concept_b = 0, 2
 
     # Ventana de transición sobre bloques
-    start_transition_block = 12
-    end_transition_block = 28
+    start_transition_block = 15
+    end_transition_block = 30
 
     rows: list[dict] = []
 
@@ -188,12 +171,13 @@ def generate_recurrent(cfg: DriftDatasetConfig) -> str:
     concept_a, concept_b = 0, 2
 
     pattern = (
-        [concept_a] * 8
+        [concept_a] * 10
         + [concept_b] * 8
-        + [concept_a] * 7
-        + [concept_b] * 7
-        + [concept_a] * 5
-        + [concept_b] * 5
+        + [concept_a] * 6
+        + [concept_b] * 6
+        + [concept_a] * 8
+        + [concept_b] * 10
+        + [concept_a] * 12
 
     )
 

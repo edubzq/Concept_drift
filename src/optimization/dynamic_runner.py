@@ -36,10 +36,8 @@ def _summary_to_df(results, dataset_name, config):
             "stream_time": summary["stream_time"],
             "optimization_time": summary["optimization_time"],
             "total_time": summary["total_time"],
-            "num_reoptimizations": summary["num_reoptimizations"],
             "final_a": summary["final_a"],
             "final_b": summary["final_b"],
-            "final_max_size": summary["final_max_size"],
         })
 
     return pd.DataFrame(rows)
@@ -78,10 +76,8 @@ def _print_comparison(summary_df):
         "stream_time",
         "optimization_time",
         "total_time",
-        "num_reoptimizations",
         "final_a",
         "final_b",
-        "final_max_size",
     ]
 
     print(summary_df[printable_cols].to_string(index=False))
@@ -147,7 +143,19 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     )
     config_curve_path = os.path.join(
         config.output_dir,
+        f"dynamic_moea_{dataset_name}_config_curve.csv",
     )
+
+    summary_df.to_csv(summary_path, index=False)
+    curves_df.to_csv(curves_path, index=False)
+    dynamic["reoptimizations"].to_csv(reopt_path, index=False)
+    dynamic["pareto_history"].to_csv(pareto_path, index=False)
+    dynamic["config_curve"].to_csv(config_curve_path, index=False)
+
+    plot_title = f"dynamic_moea_{dataset_name}"
+    plot_results(results, plot_title, plots_dir=config.plots_dir)
+    plot_path = os.path.join(config.plots_dir, f"{plot_title}.png")
+    
     if config.verbose:
         _print_comparison(summary_df)
         print("\nArchivos guardados:")
@@ -156,9 +164,7 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
         print(f"  Reoptimizaciones: {reopt_path}")
         print(f"  Historial Pareto: {pareto_path}")
         print(f"  Configuración por bloque: {config_curve_path}")
-        print(
-            f"  Plot: {os.path.join(config.plots_dir, f'dynamic_moea_{dataset_name}.png')}"
-        )
+        print(f"  Plot: {plot_path}")
 
     return {
         "summary": summary_df,
