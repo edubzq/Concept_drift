@@ -18,6 +18,9 @@ def decode_candidate(x, config):
     return {
         "a": float(x[0]),
         "b": float(x[1]),
+        "grace_period": int(round(float(x[2]))),
+        "log_delta": float(x[3]),
+        "delta": 10 ** float(x[3]),
     }
 
 
@@ -25,6 +28,8 @@ def _evaluation_cache_key(candidate, cache_decimals):
     return (
         round(float(candidate["a"]), cache_decimals),
         round(float(candidate["b"]), cache_decimals),
+        int(candidate["grace_period"]),
+        round(float(candidate["log_delta"]), cache_decimals),
     )
 
 
@@ -34,7 +39,12 @@ def _evaluate_candidate_on_window(chunks, checkpoints, block_index, candidate, c
     window_chunks = chunks[window_start:window_end]
 
     model = copy.deepcopy(checkpoints[window_start])
-    model.set_config(a=candidate["a"], b=candidate["b"])
+    model.set_config(
+        a=candidate["a"],
+        b=candidate["b"],
+        grace_period=candidate["grace_period"],
+        delta=candidate["delta"],
+    )
 
     accuracies = []
     diversities = []
@@ -70,11 +80,27 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
         self.evaluation_cache = {}
 
         super().__init__(
-            n_var=2,
+            n_var=4,
             n_obj=3,
             n_ieq_constr=0,
-            xl=np.array([config.a_min, config.b_min], dtype=float),
-            xu=np.array([config.a_max, config.b_max], dtype=float),
+            xl=np.array(
+                [
+                    config.a_min,
+                    config.b_min,
+                    config.grace_period_min,
+                    config.log_delta_min,
+                ],
+                dtype=float,
+            ),
+            xu=np.array(
+                [
+                    config.a_max,
+                    config.b_max,
+                    config.grace_period_max,
+                    config.log_delta_max,
+                ],
+                dtype=float,
+            ),
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -142,6 +168,8 @@ def _pareto_to_df(res, problem, block_index):
             "block_index": int(block_index),
             "a": round(candidate["a"], 4),
             "b": round(candidate["b"], 4),
+            "grace_period": int(candidate["grace_period"]),
+            "delta": float(candidate["delta"]),
             "recent_accuracy": round(evaluation.recent_accuracy, 6),
             "diversity": round(evaluation.diversity, 6),
             "complexity": round(evaluation.elapsed, 6),
@@ -192,6 +220,8 @@ def evaluate_fixed_learnpp(chunks, config):
         a=config.baseline_a,
         b=config.baseline_b,
         max_size=config.baseline_max_size,
+        grace_period=config.baseline_grace_period,
+        delta=config.baseline_delta,
     )
 
     accuracies = []
@@ -229,7 +259,8 @@ def evaluate_fixed_learnpp(chunks, config):
             "num_reoptimizations": 0,
             "final_a": float(config.baseline_a),
             "final_b": float(config.baseline_b),
-            "final_max_size": int(config.baseline_max_size),
+            "final_grace_period": int(config.baseline_grace_period),
+            "final_delta": float(config.baseline_delta),
         },
     )
 
@@ -259,6 +290,8 @@ def optimize_recent_window(chunks, checkpoints, config, block_index):
         "window_end": int(block_index),
         "a": float(best_candidate["a"]),
         "b": float(best_candidate["b"]),
+        "grace_period": int(best_candidate["grace_period"]),
+        "delta": float(best_candidate["delta"]),
         "window_recent_accuracy": float(best_evaluation.recent_accuracy),
         "window_diversity": float(best_evaluation.diversity),
         "window_complexity": float(best_evaluation.elapsed),
@@ -277,6 +310,8 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
         a=config.initial_a,
         b=config.initial_b,
         max_size=config.max_size,
+        grace_period=config.initial_grace_period,
+        delta=config.initial_delta,
     )
 
     accuracies = []
@@ -308,6 +343,8 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
                 "block_index": block_index,
                 "a": float(model.a),
                 "b": float(model.b),
+                "grace_period": int(model.grace_period),
+                "log_delta": float(np.log10(model.delta)),
                 "max_size": int(model.max_size),
                 "ensemble_size": int(len(model.models)),
             })
@@ -329,13 +366,20 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
 
-            model.set_config(a=selected["a"], b=selected["b"])
+            model.set_config(
+                a=selected["a"],
+                b=selected["b"],
+                grace_period=selected["grace_period"],
+                delta=selected["delta"],
+            )
 
             if config.verbose:
                 print(
                     f"Reoptimización pasiva tras bloque {block_index}: "
                     f"a={selected['a']:.4f}, "
                     f"b={selected['b']:.4f}, "
+                    f"grace_period={selected['grace_period']}, "
+                    f"delta={selected['delta']:.2e},"
                     f"recent_accuracy={selected['window_recent_accuracy']:.4f}, "
                     f"diversity={selected['window_diversity']:.4f}, "
                     f"elapsed={selected['window_complexity']:.6f}s"
@@ -363,6 +407,9 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
             "num_reoptimizations": int(len(reoptimization_rows)),
             "final_a": float(model.a),
             "final_b": float(model.b),
+            "final_grace_period": int(model.grace_period),
+            "final_log_delta": float(np.log10(model.delta)),
+            "final_delta": float(model.delta),
             "final_max_size": int(model.max_size),
             "reoptimizations": pd.DataFrame(reoptimization_rows),
             "pareto_history": pareto_history,

@@ -13,11 +13,15 @@ class DynamicMOEAConfig:
     # Configuración inicial del Learn++NSE dinámico
     initial_a: float = 0.5
     initial_b: float = 5.0
+    initial_grace_period: int = 200
+    initial_delta: float = 1e-7
     max_size: int = 20
 
     # Baseline fijo
     baseline_a: float = 0.5
     baseline_b: float = 5.0
+    baseline_grace_period: int = 200
+    baseline_delta: float = 1e-7
     baseline_max_size: int = 20
 
     # Espacio de búsqueda del MOEA
@@ -25,6 +29,10 @@ class DynamicMOEAConfig:
     a_max: float = 2.0
     b_min: float = 1.0
     b_max: float = 15.0
+    grace_period_min: int = 50
+    grace_period_max: int = 300
+    log_delta_min: float = -9.0
+    log_delta_max: float = -3.0
 
     # Detalles técnicos y salida
     cache_decimals: int = 4
@@ -62,3 +70,24 @@ def validate_dynamic_config(config: DynamicMOEAConfig):
 
     if config.b_max < config.b_min:
         raise ValueError("Rango inválido para b.")
+
+    if config.initial_grace_period < 1:
+        raise ValueError("initial_grace_period debe ser >= 1.")
+
+    if config.baseline_grace_period < 1:
+        raise ValueError("baseline_grace_period debe ser >= 1.")
+
+    if config.grace_period_min < 1:
+        raise ValueError("grace_period_min debe ser >= 1.")
+
+    if config.grace_period_max < config.grace_period_min:
+        raise ValueError("Rango inválido para grace_period.")
+
+    if config.initial_delta <= 0:
+        raise ValueError("initial_delta debe ser > 0.")
+
+    if config.baseline_delta <= 0:
+        raise ValueError("baseline_delta debe ser > 0.")
+
+    if config.log_delta_max < config.log_delta_min:
+        raise ValueError("Rango inválido para log_delta.")

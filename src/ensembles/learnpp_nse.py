@@ -4,17 +4,35 @@ from river import tree
 
 class LearnPPNSE:
 
-    def __init__(self, a=0.5, b=5, max_size=20, pruning_strategy=0):
+    def __init__(
+        self,
+        a=0.5,
+        b=5,
+        max_size=20,
+        grace_period=200,
+        delta=1e-7,
+        pruning_strategy=0,
+    ):
         self.models = []
         self.beta_history = []
         self.voting_weights = []
         self.a = a
         self.b = b
         self.max_size = max_size
+        self.grace_period = int(grace_period)
+        self.delta = float(delta)
         self.pruning_strategy = int(pruning_strategy)
         self.classes_ = None
 
-    def set_config(self, a=None, b=None, max_size=None, pruning_strategy=None):
+    def set_config(
+        self,
+        a=None,
+        b=None,
+        max_size=None,
+        grace_period=None,
+        delta=None,
+        pruning_strategy=None,
+    ):
         """Actualiza la configuración del ensemble sin reiniciar su historial."""
         if a is not None:
             self.a = float(a)
@@ -22,6 +40,10 @@ class LearnPPNSE:
             self.b = float(b)
         if max_size is not None:
             self.max_size = int(max_size)
+        if grace_period is not None:
+            self.grace_period = int(grace_period)
+        if delta is not None:
+            self.delta = float(delta)
         if pruning_strategy is not None:
             self.pruning_strategy = int(pruning_strategy)
 
@@ -163,10 +185,13 @@ class LearnPPNSE:
 
         D_t = weights / (weights.sum() + 1e-10)
 
-        # ---------------------------------------------
+      # ---------------------------------------------
         # 3. Entrenar nuevo clasificador
         # ---------------------------------------------
-        new_model = tree.HoeffdingTreeClassifier()
+        new_model = tree.HoeffdingTreeClassifier(
+            grace_period=self.grace_period,
+            delta=self.delta,
+        )
 
         for xi, yi in zip(X_records, y_array):
             new_model.learn_one(xi, yi)

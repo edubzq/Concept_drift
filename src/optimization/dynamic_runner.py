@@ -38,6 +38,9 @@ def _summary_to_df(results, dataset_name, config):
             "total_time": summary["total_time"],
             "final_a": summary["final_a"],
             "final_b": summary["final_b"],
+            "final_grace_period": summary["final_grace_period"],
+            #"final_log_delta": summary["final_log_delta"],
+            "final_delta": summary["final_delta"],
         })
 
     return pd.DataFrame(rows)
@@ -78,6 +81,9 @@ def _print_comparison(summary_df):
         "total_time",
         "final_a",
         "final_b",
+        "final_grace_period",
+        #"final_log_delta",
+        "final_delta",
     ]
 
     print(summary_df[printable_cols].to_string(index=False))
@@ -97,19 +103,11 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     if config.verbose:
         print(f"Dataset: {config.dataset_path}")
         print(f"Bloques: {len(chunks)}")
-        print("Reoptimización: pasiva")
-        print("Criterio: se ejecuta en cada bloque con ventana completa")
-        print("Detector de drift: no se usa")
-        print(f"Ventana fija: {config.window_size} bloques")
-        print(f"max_size fijo del MOEA pasivo: {config.max_size}")
+        print("Cromosoma MOEA: a, b, grace_period, delta")
         print(f"NSGA-II: pop_size={config.pop_size}, n_gen={config.n_gen}")
         print(
             "Objetivos MOEA: maximizar recent_accuracy y diversity; "
             "minimizar tiempo de ejecución"
-        )
-        print(
-            "Evaluación de candidatos: desde checkpoints del ensemble real "
-            "anteriores a la ventana fija."
         )
 
     baseline = evaluate_fixed_learnpp(chunks, config)
@@ -192,16 +190,60 @@ def parse_args():
 
     parser.add_argument("--initial-a", type=float, default=DynamicMOEAConfig.initial_a)
     parser.add_argument("--initial-b", type=float, default=DynamicMOEAConfig.initial_b)
+    parser.add_argument(
+        "--initial-grace-period",
+        type=int,
+        default=DynamicMOEAConfig.initial_grace_period,
+    )
+    parser.add_argument(
+        "--initial-delta",
+        type=float,
+        default=DynamicMOEAConfig.initial_delta,
+    )
     parser.add_argument("--max-size", type=int, default=DynamicMOEAConfig.max_size)
 
     parser.add_argument("--baseline-a", type=float, default=DynamicMOEAConfig.baseline_a)
     parser.add_argument("--baseline-b", type=float, default=DynamicMOEAConfig.baseline_b)
-    parser.add_argument("--baseline-max-size", type=int, default=DynamicMOEAConfig.baseline_max_size)
+    parser.add_argument(
+        "--baseline-grace-period",
+        type=int,
+        default=DynamicMOEAConfig.baseline_grace_period,
+    )
+    parser.add_argument(
+        "--baseline-delta",
+        type=float,
+        default=DynamicMOEAConfig.baseline_delta,
+    )
+    parser.add_argument(
+        "--baseline-max-size",
+        type=int,
+        default=DynamicMOEAConfig.baseline_max_size,
+    )
 
     parser.add_argument("--a-min", type=float, default=DynamicMOEAConfig.a_min)
     parser.add_argument("--a-max", type=float, default=DynamicMOEAConfig.a_max)
     parser.add_argument("--b-min", type=float, default=DynamicMOEAConfig.b_min)
     parser.add_argument("--b-max", type=float, default=DynamicMOEAConfig.b_max)
+    parser.add_argument(
+        "--grace-period-min",
+        type=int,
+        default=DynamicMOEAConfig.grace_period_min,
+    )
+    parser.add_argument(
+        "--grace-period-max",
+        type=int,
+        default=DynamicMOEAConfig.grace_period_max,
+    )
+    parser.add_argument(
+        "--log-delta-min",
+        type=float,
+        default=DynamicMOEAConfig.log_delta_min,
+    )
+    parser.add_argument(
+        "--log-delta-max",
+        type=float,
+        default=DynamicMOEAConfig.log_delta_max,
+    )
 
     parser.add_argument("--output-dir", default=DynamicMOEAConfig.output_dir)
     parser.add_argument("--plots-dir", default=DynamicMOEAConfig.plots_dir)
@@ -225,14 +267,22 @@ def main():
         seed=args.seed,
         initial_a=args.initial_a,
         initial_b=args.initial_b,
+        initial_grace_period=args.initial_grace_period,
+        initial_delta=args.initial_delta,
         max_size=args.max_size,
         baseline_a=args.baseline_a,
         baseline_b=args.baseline_b,
+        baseline_grace_period=args.baseline_grace_period,
+        baseline_delta=args.baseline_delta,
         baseline_max_size=args.baseline_max_size,
         a_min=args.a_min,
         a_max=args.a_max,
         b_min=args.b_min,
         b_max=args.b_max,
+        grace_period_min=args.grace_period_min,
+        grace_period_max=args.grace_period_max,
+        log_delta_min=args.log_delta_min,
+        log_delta_max=args.log_delta_max,
         output_dir=args.output_dir,
         plots_dir=args.plots_dir,
         verbose=not args.quiet,

@@ -44,7 +44,7 @@ def replace_concept_b_targets(df: pd.DataFrame, concept_b: int = 2) -> pd.DataFr
 @dataclass(frozen=True)
 class DriftDatasetConfig:
     output_dir: str = "datasets"
-    total_samples: int = 30_000
+    total_samples: int = 25_000
     chunk_size: int = 500
     seed: int = 42
 
@@ -175,9 +175,9 @@ def generate_recurrent(cfg: DriftDatasetConfig) -> str:
         + [concept_b] * 8
         + [concept_a] * 6
         + [concept_b] * 6
+        + [concept_a] * 6
+        + [concept_b] * 6
         + [concept_a] * 8
-        + [concept_b] * 10
-        + [concept_a] * 12
 
     )
 
