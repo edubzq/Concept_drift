@@ -9,12 +9,14 @@ class DynamicMOEAConfig:
     pop_size: int = 8
     n_gen: int = 4
     seed: int = 42
+    n_jobs: int = 1
 
     # Configuración inicial del Learn++NSE dinámico
     initial_a: float = 0.5
     initial_b: float = 5.0
     initial_grace_period: int = 200
     initial_delta: float = 1e-7
+    initial_weight_power: float = 1.0
     max_size: int = 20
 
     # Baseline fijo
@@ -22,6 +24,7 @@ class DynamicMOEAConfig:
     baseline_b: float = 5.0
     baseline_grace_period: int = 200
     baseline_delta: float = 1e-7
+    baseline_weight_power: float = 1.0
     baseline_max_size: int = 20
 
     # Espacio de búsqueda del MOEA
@@ -35,6 +38,10 @@ class DynamicMOEAConfig:
     log_delta_max: float = -4.5
     recency_lambda_min: float = 0.0
     recency_lambda_max: float = 3.0
+    recency_lambda_min: float = 0.0
+    recency_lambda_max: float = 3.0
+    weight_power_min: float = 0.5
+    weight_power_max: float = 3.0
 
     # Detalles técnicos y salida
     cache_decimals: int = 4

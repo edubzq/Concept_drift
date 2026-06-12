@@ -12,6 +12,7 @@ class LearnPPNSE:
         grace_period=200,
         delta=1e-7,
         pruning_strategy=0,
+        weight_power=1.0,
     ):
         self.models = []
         self.beta_history = []
@@ -22,6 +23,7 @@ class LearnPPNSE:
         self.grace_period = int(grace_period)
         self.delta = float(delta)
         self.pruning_strategy = int(pruning_strategy)
+        self.weight_power = float(weight_power)
         self.classes_ = None
 
     def set_config(
@@ -32,6 +34,7 @@ class LearnPPNSE:
         grace_period=None,
         delta=None,
         pruning_strategy=None,
+        weight_power=None,
     ):
         """Actualiza la configuración del ensemble sin reiniciar su historial."""
         if a is not None:
@@ -46,6 +49,8 @@ class LearnPPNSE:
             self.delta = float(delta)
         if pruning_strategy is not None:
             self.pruning_strategy = int(pruning_strategy)
+        if weight_power is not None:
+            self.weight_power = float(weight_power)
 
         if len(self.models) > self.max_size:
             self.prune_to_max_size()
@@ -103,7 +108,8 @@ class LearnPPNSE:
             omega = omega / (omega.sum() + 1e-10)
 
             beta_avg = float(np.dot(omega, beta_values))
-            weight = np.log(1.0 / (beta_avg + 1e-10))
+            base_weight = max(np.log(1.0 / (beta_avg + 1e-10)), 0.0)
+            weight = base_weight ** self.weight_power
 
             self.voting_weights.append(weight)
 

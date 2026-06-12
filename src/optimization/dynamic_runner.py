@@ -46,6 +46,7 @@ def _summary_to_df(results, dataset_name, config):
             "final_log_delta": float(final_log_delta),
             "final_delta": final_delta,
             "final_recency_lambda": summary.get("final_recency_lambda", np.nan),
+            "final_weight_power": summary.get("final_weight_power", np.nan),
         })
 
     return pd.DataFrame(rows)
@@ -89,7 +90,8 @@ def _print_comparison(summary_df):
         "final_grace_period",
         "final_log_delta",
         "final_delta",
-        "final_recency_lambda"
+        "final_recency_lambda",
+        "final_weight_power",
     ]
 
     print(summary_df[printable_cols].to_string(index=False))
@@ -109,7 +111,7 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     if config.verbose:
         print(f"Dataset: {config.dataset_path}")
         print(f"Bloques: {len(chunks)}")
-        print("Cromosoma MOEA: a, b, grace_period, delta, recency_lambda")
+        print("Cromosoma MOEA: a, b, grace_period, delta, recency_lambda, weigght_power")
         print(f"NSGA-II: pop_size={config.pop_size}, n_gen={config.n_gen}")
         print(
             "Objetivos MOEA: maximizar recent_accuracy y diversity; "
@@ -193,7 +195,7 @@ def parse_args():
     parser.add_argument("--pop-size", type=int, default=DynamicMOEAConfig.pop_size)
     parser.add_argument("--n-gen", type=int, default=DynamicMOEAConfig.n_gen)
     parser.add_argument("--seed", type=int, default=DynamicMOEAConfig.seed)
-
+    parser.add_argument("--n-jobs", type=int, default=DynamicMOEAConfig.n_jobs)
     parser.add_argument("--initial-a", type=float, default=DynamicMOEAConfig.initial_a)
     parser.add_argument("--initial-b", type=float, default=DynamicMOEAConfig.initial_b)
     parser.add_argument(
@@ -205,6 +207,11 @@ def parse_args():
         "--initial-delta",
         type=float,
         default=DynamicMOEAConfig.initial_delta,
+    )
+    parser.add_argument(
+        "--initial-weight-power",
+        type=float,
+        default=DynamicMOEAConfig.initial_weight_power,
     )
     parser.add_argument("--max-size", type=int, default=DynamicMOEAConfig.max_size)
 
@@ -219,6 +226,11 @@ def parse_args():
         "--baseline-delta",
         type=float,
         default=DynamicMOEAConfig.baseline_delta,
+    )
+    parser.add_argument(
+        "--baseline-weight-power",
+        type=float,
+        default=DynamicMOEAConfig.baseline_weight_power,
     )
     parser.add_argument(
         "--baseline-max-size",
@@ -260,6 +272,16 @@ def parse_args():
         type=float,
         default=DynamicMOEAConfig.recency_lambda_max,
     )
+    parser.add_argument(
+        "--weight-power-min",
+        type=float,
+        default=DynamicMOEAConfig.weight_power_min,
+    )
+    parser.add_argument(
+        "--weight-power-max",
+        type=float,
+        default=DynamicMOEAConfig.weight_power_max,
+    )
     parser.add_argument("--output-dir", default=DynamicMOEAConfig.output_dir)
     parser.add_argument("--plots-dir", default=DynamicMOEAConfig.plots_dir)
     parser.add_argument(
@@ -280,15 +302,18 @@ def main():
         pop_size=args.pop_size,
         n_gen=args.n_gen,
         seed=args.seed,
+        n_jobs=args.n_jobs,
         initial_a=args.initial_a,
         initial_b=args.initial_b,
         initial_grace_period=args.initial_grace_period,
         initial_delta=args.initial_delta,
+        initial_weight_power=args.initial_weight_power,
         max_size=args.max_size,
         baseline_a=args.baseline_a,
         baseline_b=args.baseline_b,
         baseline_grace_period=args.baseline_grace_period,
         baseline_delta=args.baseline_delta,
+        baseline_weight_power=args.baseline_weight_power,
         baseline_max_size=args.baseline_max_size,
         a_min=args.a_min,
         a_max=args.a_max,
@@ -300,6 +325,8 @@ def main():
         log_delta_max=args.log_delta_max,
         recency_lambda_min=args.recency_lambda_min,
         recency_lambda_max=args.recency_lambda_max,
+        weight_power_min=args.weight_power_min,
+        weight_power_max=args.weight_power_max,
         output_dir=args.output_dir,
         plots_dir=args.plots_dir,
         verbose=not args.quiet,
