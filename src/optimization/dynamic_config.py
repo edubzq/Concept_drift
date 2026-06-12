@@ -33,15 +33,13 @@ class DynamicMOEAConfig:
     b_min: float = 1.0
     b_max: float = 15.0
     grace_period_min: int = 50
-    grace_period_max: int = 300
+    grace_period_max: int = 150
     log_delta_min: float = -8.5
     log_delta_max: float = -4.5
-    recency_lambda_min: float = 0.0
-    recency_lambda_max: float = 3.0
-    recency_lambda_min: float = 0.0
-    recency_lambda_max: float = 3.0
-    weight_power_min: float = 0.5
-    weight_power_max: float = 3.0
+    recency_lambda_min: float = 0.5
+    recency_lambda_max: float = 1.5
+    weight_power_min: float = 0.8
+    weight_power_max: float = 1.5
 
     # Detalles técnicos y salida
     cache_decimals: int = 4

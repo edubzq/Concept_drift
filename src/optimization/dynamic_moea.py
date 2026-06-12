@@ -8,6 +8,7 @@ from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 from river import metrics
 from pymoo.parallelization.joblib import JoblibParallelization
+from pymoo.termination.default import DefaultMultiObjectiveTermination
 from src.ensembles.learnpp_nse import LearnPPNSE
 from src.optimization.dynamic_config import CandidateEvaluation
 from src.utils.metrics import compute_ensemble_diversity, _safe_nanmean
@@ -54,7 +55,20 @@ def _recency_weighted_mean(values, recency_lambda):
     weights = weights / (weights.sum() + 1e-10)
 
     return float(np.dot(weights, values[valid_mask]))
+    
+def _build_dynamic_termination(config):
+    # Usa n_gen como techo, pero permite parar antes si el frente Pareto se
+    # estabiliza en el espacio objetivo.
+    period = max(3, min(10, int(config.n_gen)))
 
+    return DefaultMultiObjectiveTermination(
+        xtol=1e-8,
+        cvtol=1e-6,
+        ftol=0.0025,
+        period=period,
+        n_max_gen=int(config.n_gen),
+        n_max_evals=int(config.pop_size * config.n_gen),
+    )
 
 def _evaluate_candidate_on_window(chunks, block_index, candidate, config):
     window_start = block_index + 1 - config.window_size
@@ -331,7 +345,7 @@ def optimize_recent_window(chunks, config, block_index):
         **problem_kwargs,
     )
     algorithm = NSGA2(pop_size=config.pop_size)
-    termination = get_termination("n_gen", config.n_gen)
+    termination = _build_dynamic_termination(config)
 
     start = time.perf_counter()
     res = minimize(
