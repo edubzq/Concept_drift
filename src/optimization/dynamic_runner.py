@@ -45,6 +45,7 @@ def _summary_to_df(results, dataset_name, config):
             "final_grace_period": summary["final_grace_period"],
             "final_log_delta": float(final_log_delta),
             "final_delta": final_delta,
+            "final_recency_lambda": summary.get("final_recency_lambda", np.nan),
         })
 
     return pd.DataFrame(rows)
@@ -88,6 +89,7 @@ def _print_comparison(summary_df):
         "final_grace_period",
         "final_log_delta",
         "final_delta",
+        "final_recency_lambda"
     ]
 
     print(summary_df[printable_cols].to_string(index=False))
@@ -107,7 +109,7 @@ def run_dynamic_moea_experiment(config=None, **kwargs):
     if config.verbose:
         print(f"Dataset: {config.dataset_path}")
         print(f"Bloques: {len(chunks)}")
-        print("Cromosoma MOEA: a, b, grace_period, delta")
+        print("Cromosoma MOEA: a, b, grace_period, delta, recency_lambda")
         print(f"NSGA-II: pop_size={config.pop_size}, n_gen={config.n_gen}")
         print(
             "Objetivos MOEA: maximizar recent_accuracy y diversity; "
@@ -248,7 +250,16 @@ def parse_args():
         type=float,
         default=DynamicMOEAConfig.log_delta_max,
     )
-
+    parser.add_argument(
+        "--recency-lambda-min",
+        type=float,
+        default=DynamicMOEAConfig.recency_lambda_min,
+    )
+    parser.add_argument(
+        "--recency-lambda-max",
+        type=float,
+        default=DynamicMOEAConfig.recency_lambda_max,
+    )
     parser.add_argument("--output-dir", default=DynamicMOEAConfig.output_dir)
     parser.add_argument("--plots-dir", default=DynamicMOEAConfig.plots_dir)
     parser.add_argument(
@@ -287,6 +298,8 @@ def main():
         grace_period_max=args.grace_period_max,
         log_delta_min=args.log_delta_min,
         log_delta_max=args.log_delta_max,
+        recency_lambda_min=args.recency_lambda_min,
+        recency_lambda_max=args.recency_lambda_max,
         output_dir=args.output_dir,
         plots_dir=args.plots_dir,
         verbose=not args.quiet,

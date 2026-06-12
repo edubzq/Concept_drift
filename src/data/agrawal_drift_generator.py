@@ -41,7 +41,7 @@ def replace_concept_b_targets(df: pd.DataFrame, concept_b: int = 2) -> pd.DataFr
 @dataclass(frozen=True)
 class DriftDatasetConfig:
     output_dir: str = "datasets"
-    total_samples: int = 25_000
+    total_samples: int = 20_000
     chunk_size: int = 500
     seed: int = 42
 
@@ -84,7 +84,7 @@ def _write_dataset(
     # block generado por SyntheticBlockGenerator empieza en 1
     concept_by_block = {block_idx + 1: concept for block_idx, concept in enumerate(concepts)}
     df["concept"] = df["block"].map(concept_by_block).astype(int)
-    replace_concept_b_targets(df)
+    #replace_concept_b_targets(df)
     df.to_csv(path, index=False)
 
     print(f"Dataset generado: {path} ({len(df)} filas, {cfg.n_blocks} bloques)")
@@ -94,7 +94,7 @@ def _write_dataset(
 def generate_abrupt(cfg: DriftDatasetConfig) -> str:
     
     concept_a, concept_b = 0, 2
-    drift_start = 20
+    drift_start = 15
     concepts = [concept_a] * drift_start + [concept_b] * (cfg.n_blocks - drift_start)
     generators = [
         synth.Agrawal(classification_function=concept, seed=cfg.seed + i)
@@ -112,8 +112,8 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
     concept_a, concept_b = 0, 2
 
     # Ventana de transición sobre bloques
-    start_transition_block = 15
-    end_transition_block = 35
+    start_transition_block = 12
+    end_transition_block = 25
 
     rows: list[dict] = []
 
@@ -155,7 +155,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
             rows.append(row)
 
     df = pd.DataFrame(rows)
-    replace_concept_b_targets(df)
+    #replace_concept_b_targets(df)
     path = os.path.join(cfg.output_dir, "agrawal_gradual.csv")
     df.to_csv(path, index=False)
 
@@ -171,11 +171,8 @@ def generate_recurrent(cfg: DriftDatasetConfig) -> str:
         [concept_a] * 10
         + [concept_b] * 8
         + [concept_a] * 6
-        + [concept_b] * 6
-        + [concept_a] * 6
-        + [concept_b] * 6
+        + [concept_b] * 8
         + [concept_a] * 8
-
     )
 
     concepts = pattern[: cfg.n_blocks]

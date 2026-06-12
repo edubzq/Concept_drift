@@ -1,4 +1,3 @@
-
 import time
 
 import numpy as np
@@ -21,6 +20,7 @@ def decode_candidate(x, config):
         "grace_period": int(round(float(x[2]))),
         "log_delta": float(x[3]),
         "delta": 10 ** float(x[3]),
+        "recency_lambda": float(x[4]),
     }
 
 
@@ -30,7 +30,28 @@ def _evaluation_cache_key(candidate, cache_decimals):
         round(float(candidate["b"]), cache_decimals),
         int(candidate["grace_period"]),
         round(float(candidate["log_delta"]), cache_decimals),
+        round(float(candidate["recency_lambda"]), cache_decimals),
     )
+
+
+def _recency_weighted_mean(values, recency_lambda):
+    values = np.asarray(values, dtype=float)
+
+    if len(values) == 0:
+        return np.nan
+
+    valid_mask = ~np.isnan(values)
+    if not np.any(valid_mask):
+        return np.nan
+
+    # Los valores llegan en orden cronológico. Con lambda=0 la media es
+    # uniforme; al aumentar lambda, los bloques más recientes pesan más.
+    ages = np.arange(len(values) - 1, -1, -1, dtype=float)
+    weights = np.exp(-float(recency_lambda) * ages)
+    weights = weights[valid_mask]
+    weights = weights / (weights.sum() + 1e-10)
+
+    return float(np.dot(weights, values[valid_mask]))
 
 
 def _evaluate_candidate_on_window(chunks, block_index, candidate, config):
@@ -65,14 +86,15 @@ def _evaluate_candidate_on_window(chunks, block_index, candidate, config):
 
     elapsed = time.perf_counter() - start
 
-    # Con window_size=2, esto evalúa solo el último bloque de la ventana.
-    objective_size = min(1, len(accuracies))
-    recent_accuracies = accuracies[-objective_size:]
-    recent_diversities = diversities[-objective_size:]
-
     return CandidateEvaluation(
-        recent_accuracy=_safe_nanmean(recent_accuracies),
-        diversity=_safe_nanmean(recent_diversities),
+        recent_accuracy=_recency_weighted_mean(
+            accuracies,
+            candidate["recency_lambda"],
+        ),
+        diversity=_recency_weighted_mean(
+            diversities,
+            candidate["recency_lambda"],
+        ),
         complexity=float(elapsed),
         elapsed=float(elapsed),
     )
@@ -86,7 +108,7 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
         self.evaluation_cache = {}
 
         super().__init__(
-            n_var=4,
+            n_var=5,
             n_obj=3,
             n_ieq_constr=0,
             xl=np.array(
@@ -95,6 +117,7 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
                     config.b_min,
                     config.grace_period_min,
                     config.log_delta_min,
+                    config.recency_lambda_min,
                 ],
                 dtype=float,
             ),
@@ -104,6 +127,7 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
                     config.b_max,
                     config.grace_period_max,
                     config.log_delta_max,
+                    config.recency_lambda_max,
                 ],
                 dtype=float,
             ),
@@ -115,11 +139,11 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
 
         if cache_key not in self.evaluation_cache:
             self.evaluation_cache[cache_key] = _evaluate_candidate_on_window(
-            self.chunks,
-            self.block_index,
-            candidate,
-            self.config,
-        )
+                self.chunks,
+                self.block_index,
+                candidate,
+                self.config,
+            )
         evaluation = self.evaluation_cache[cache_key]
 
         out["F"] = np.array(
@@ -154,7 +178,7 @@ def choose_compromise_solution(res):
             ) / (max_value - min_value)
 
     # recent_accuracy, diversity, elapsed_time
-    weights = np.array([0.60, 0.25, 0.15], dtype=float)
+    weights = np.array([0.55, 0.30, 0.15], dtype=float)
     score = normalized @ weights
     best_idx = int(np.argmin(score))
 
@@ -174,6 +198,7 @@ def _pareto_to_df(res, problem, block_index):
             "b": round(candidate["b"], 4),
             "grace_period": int(candidate["grace_period"]),
             "delta": float(candidate["delta"]),
+            "recency_lambda": round(candidate["recency_lambda"], 4),
             "recent_accuracy": round(evaluation.recent_accuracy, 6),
             "diversity": round(evaluation.diversity, 6),
             "complexity": round(evaluation.elapsed, 6),
@@ -296,6 +321,7 @@ def optimize_recent_window(chunks, config, block_index):
         "b": float(best_candidate["b"]),
         "grace_period": int(best_candidate["grace_period"]),
         "delta": float(best_candidate["delta"]),
+        "recency_lambda": float(best_candidate["recency_lambda"]),
         "window_recent_accuracy": float(best_evaluation.recent_accuracy),
         "window_diversity": float(best_evaluation.diversity),
         "window_complexity": float(best_evaluation.elapsed),
@@ -323,6 +349,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
     diversities = []
     ensemble_sizes = []
     config_curve = []
+    current_recency_lambda = np.nan
     reoptimization_rows = []
     pareto_frames = []
     optimization_time = 0.0
@@ -347,6 +374,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
                 "b": float(model.b),
                 "grace_period": int(model.grace_period),
                 "log_delta": float(np.log10(model.delta)),
+                "recency_lambda": float(current_recency_lambda),
                 "max_size": int(model.max_size),
                 "ensemble_size": int(len(model.models)),
             })
@@ -367,6 +395,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
 
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
+            current_recency_lambda = selected["recency_lambda"]
 
             # no sustituimos el modelo real, solo actualizamos sus hiperparámetros.
             model.set_config(
@@ -382,7 +411,8 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
                     f"a={selected['a']:.4f}, "
                     f"b={selected['b']:.4f}, "
                     f"grace_period={selected['grace_period']}, "
-                    f"delta={selected['delta']:.2e},"
+                    f"delta={selected['delta']:.2e}, "
+                    f"lambda={selected['recency_lambda']:.4f}, "
                     f"recent_accuracy={selected['window_recent_accuracy']:.4f}, "
                     f"diversity={selected['window_diversity']:.4f}, "
                     f"elapsed={selected['window_complexity']:.6f}s"
@@ -413,6 +443,7 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
             "final_grace_period": int(model.grace_period),
             "final_log_delta": float(np.log10(model.delta)),
             "final_delta": float(model.delta),
+            "final_recency_lambda": float(current_recency_lambda),
             "final_max_size": int(model.max_size),
             "reoptimizations": pd.DataFrame(reoptimization_rows),
             "pareto_history": pareto_history,

@@ -33,6 +33,8 @@ class DynamicMOEAConfig:
     grace_period_max: int = 300
     log_delta_min: float = -8.5
     log_delta_max: float = -4.5
+    recency_lambda_min: float = 0.0
+    recency_lambda_max: float = 3.0
 
     # Detalles técnicos y salida
     cache_decimals: int = 4
@@ -91,3 +93,9 @@ def validate_dynamic_config(config: DynamicMOEAConfig):
 
     if config.log_delta_max < config.log_delta_min:
         raise ValueError("Rango inválido para log_delta.")
+
+    if config.recency_lambda_min < 0:
+        raise ValueError("recency_lambda_min debe ser >= 0.")
+
+    if config.recency_lambda_max < config.recency_lambda_min:
+        raise ValueError("Rango inválido para recency_lambda.")
