@@ -1,4 +1,4 @@
-import copy
+
 import time
 
 import numpy as np
@@ -33,15 +33,17 @@ def _evaluation_cache_key(candidate, cache_decimals):
     )
 
 
-def _evaluate_candidate_on_window(chunks, checkpoints, block_index, candidate, config):
+def _evaluate_candidate_on_window(chunks, block_index, candidate, config):
     window_start = block_index + 1 - config.window_size
     window_end = block_index + 1
     window_chunks = chunks[window_start:window_end]
 
-    model = copy.deepcopy(checkpoints[window_start])
-    model.set_config(
+    # Versión sin checkpoint:
+    # cada candidato parte de un Learn++NSE vacío y se entrena solo con la ventana reciente.
+    model = LearnPPNSE(
         a=candidate["a"],
         b=candidate["b"],
+        max_size=config.max_size,
         grace_period=candidate["grace_period"],
         delta=candidate["delta"],
     )
@@ -63,49 +65,22 @@ def _evaluate_candidate_on_window(chunks, checkpoints, block_index, candidate, c
 
     elapsed = time.perf_counter() - start
 
-    #acc reciente = de los 2-3 ultimos bloques
-    objective_size = min(2, len(accuracies))
+    # Con window_size=2, esto evalúa solo el último bloque de la ventana.
+    objective_size = min(1, len(accuracies))
     recent_accuracies = accuracies[-objective_size:]
-
+    recent_diversities = diversities[-objective_size:]
 
     return CandidateEvaluation(
         recent_accuracy=_safe_nanmean(recent_accuracies),
-        diversity=_safe_nanmean(diversities),
+        diversity=_safe_nanmean(recent_diversities),
         complexity=float(elapsed),
         elapsed=float(elapsed),
     )
 
-def _rebuild_candidate_model_on_window(chunks, checkpoints, block_index, candidate, config):
-    window_start = block_index + 1 - config.window_size
-    window_end = block_index + 1
-    window_chunks = chunks[window_start:window_end]
-
-    model = copy.deepcopy(checkpoints[window_start])
-
-    model.set_config(
-        a=candidate["a"],
-        b=candidate["b"],
-        grace_period=candidate["grace_period"],
-        delta=candidate["delta"],
-    )
-
-    replay_checkpoints = []
-
-    for X, y in window_chunks:
-        # Guardamos el estado antes de procesar cada bloque de la ventana.
-        replay_checkpoints.append(copy.deepcopy(model))
-
-        # Para reconstruir el estado final no hace falta predecir;
-        # predict no debería cambiar el estado del modelo.
-        model.fit_chunk(X, y)
-
-    return model, replay_checkpoints
-
 
 class PassiveLearnPPNSGAProblem(ElementwiseProblem):
-    def __init__(self, chunks, checkpoints, block_index, config):
+    def __init__(self, chunks, block_index, config):
         self.chunks = chunks
-        self.checkpoints = checkpoints
         self.block_index = block_index
         self.config = config
         self.evaluation_cache = {}
@@ -140,13 +115,11 @@ class PassiveLearnPPNSGAProblem(ElementwiseProblem):
 
         if cache_key not in self.evaluation_cache:
             self.evaluation_cache[cache_key] = _evaluate_candidate_on_window(
-                self.chunks,
-                self.checkpoints,
-                self.block_index,
-                candidate,
-                self.config,
-            )
-
+            self.chunks,
+            self.block_index,
+            candidate,
+            self.config,
+        )
         evaluation = self.evaluation_cache[cache_key]
 
         out["F"] = np.array(
@@ -296,8 +269,8 @@ def evaluate_fixed_learnpp(chunks, config):
     )
 
 
-def optimize_recent_window(chunks, checkpoints, config, block_index):
-    problem = PassiveLearnPPNSGAProblem(chunks, checkpoints, block_index, config)
+def optimize_recent_window(chunks, config, block_index):
+    problem = PassiveLearnPPNSGAProblem(chunks, block_index, config)
     algorithm = NSGA2(pop_size=config.pop_size)
     termination = get_termination("n_gen", config.n_gen)
 
@@ -352,14 +325,12 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
     config_curve = []
     reoptimization_rows = []
     pareto_frames = []
-    checkpoints = []
     optimization_time = 0.0
     kappa_metric = metrics.CohenKappa()
 
     stream_start = time.perf_counter()
 
     for block_index, (X, y) in enumerate(chunks):
-        checkpoints.append(copy.deepcopy(model))
 
         if block_index > 0:
             accuracy, kappa, diversity = _predict_update_metrics(
@@ -388,47 +359,22 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
         if has_next_block and has_full_window:
             selected, pareto_df = optimize_recent_window(
                 chunks=chunks,
-                checkpoints=checkpoints,
                 config=config,
                 block_index=block_index,
             )
 
-            replay_start = time.perf_counter()
-
-            best_candidate_model, replay_checkpoints = _rebuild_candidate_model_on_window(
-                chunks=chunks,
-                checkpoints=checkpoints,
-                block_index=block_index,
-                candidate=selected,
-                config=config,
-            )
-
-            replay_elapsed = time.perf_counter() - replay_start
-
-            # El coste de optimización incluye:
-            # 1) tiempo de NSGA-II
-            # 2) tiempo de reconstruir el candidato ganador
-            optimization_time += selected["optimizer_elapsed"] + replay_elapsed
-
-            selected["replay_elapsed"] = float(replay_elapsed)
-            selected["optimization_total_elapsed"] = float(
-                selected["optimizer_elapsed"] + replay_elapsed
-            )
-
-            # Sustituimos el modelo real por el candidato ganador completo.
-            model = best_candidate_model
-
-            # Muy importante:
-            # al sustituir el modelo por una trayectoria reconstruida,
-            # los checkpoints de esa ventana quedan desactualizados.
-            # Los reemplazamos por los checkpoints generados durante el replay.
-            window_start = selected["window_start"]
-            window_end_exclusive = selected["window_end"] + 1
-
-            checkpoints[window_start:window_end_exclusive] = replay_checkpoints
+            optimization_time += selected["optimizer_elapsed"]
 
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
+
+            # no sustituimos el modelo real, solo actualizamos sus hiperparámetros.
+            model.set_config(
+                a=selected["a"],
+                b=selected["b"],
+                grace_period=selected["grace_period"],
+                delta=selected["delta"],
+            )
 
             if config.verbose:
                 print(
