@@ -5,9 +5,9 @@ class DynamicMOEAConfig:
     dataset_path: str = "datasets/agrawal_abrupt.csv"
 
     # Ventana fija y NSGA-II
-    window_size: int = 10
-    pop_size: int = 20
-    n_gen: int = 15
+    window_size: int = 2
+    pop_size: int = 8
+    n_gen: int = 4
     seed: int = 42
 
     # Configuración inicial del Learn++NSE dinámico
@@ -31,8 +31,8 @@ class DynamicMOEAConfig:
     b_max: float = 15.0
     grace_period_min: int = 50
     grace_period_max: int = 300
-    log_delta_min: float = -9.0
-    log_delta_max: float = -3.0
+    log_delta_min: float = -8.5
+    log_delta_max: float = -4.5
 
     # Detalles técnicos y salida
     cache_decimals: int = 4

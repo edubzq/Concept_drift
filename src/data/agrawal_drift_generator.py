@@ -18,18 +18,15 @@ def classification_function(x: dict) -> int:
     elevel = x["elevel"]
 
     if age < 40:
-        # En función 0 todos los menores de 40 eran clase 1.
-        # Ahora excluimos dos niveles educativos, no solo uno.
+
         return int(elevel in [0, 1, 2])
 
     elif age < 60:
-        # En función 0 este grupo era clase 0.
-        # Ahora algunos casos pasan a clase 1.
-        return int(elevel in [1, 2])
+        
+        return int(elevel in [1, 2, 3])
 
     else:
-        # En función 0 todos los mayores de 60 eran clase 1.
-        # Ahora excluimos dos niveles educativos.
+
         return int(elevel in [2, 3, 4])
 
 
@@ -116,7 +113,7 @@ def generate_gradual(cfg: DriftDatasetConfig) -> str:
 
     # Ventana de transición sobre bloques
     start_transition_block = 15
-    end_transition_block = 30
+    end_transition_block = 35
 
     rows: list[dict] = []
 

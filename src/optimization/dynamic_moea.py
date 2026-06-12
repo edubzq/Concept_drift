@@ -63,12 +63,43 @@ def _evaluate_candidate_on_window(chunks, checkpoints, block_index, candidate, c
 
     elapsed = time.perf_counter() - start
 
+    #acc reciente = de los 2-3 ultimos bloques
+    objective_size = min(2, len(accuracies))
+    recent_accuracies = accuracies[-objective_size:]
+
+
     return CandidateEvaluation(
-        recent_accuracy=_safe_nanmean(accuracies),
+        recent_accuracy=_safe_nanmean(recent_accuracies),
         diversity=_safe_nanmean(diversities),
         complexity=float(elapsed),
         elapsed=float(elapsed),
     )
+
+def _rebuild_candidate_model_on_window(chunks, checkpoints, block_index, candidate, config):
+    window_start = block_index + 1 - config.window_size
+    window_end = block_index + 1
+    window_chunks = chunks[window_start:window_end]
+
+    model = copy.deepcopy(checkpoints[window_start])
+
+    model.set_config(
+        a=candidate["a"],
+        b=candidate["b"],
+        grace_period=candidate["grace_period"],
+        delta=candidate["delta"],
+    )
+
+    replay_checkpoints = []
+
+    for X, y in window_chunks:
+        # Guardamos el estado antes de procesar cada bloque de la ventana.
+        replay_checkpoints.append(copy.deepcopy(model))
+
+        # Para reconstruir el estado final no hace falta predecir;
+        # predict no debería cambiar el estado del modelo.
+        model.fit_chunk(X, y)
+
+    return model, replay_checkpoints
 
 
 class PassiveLearnPPNSGAProblem(ElementwiseProblem):
@@ -150,7 +181,7 @@ def choose_compromise_solution(res):
             ) / (max_value - min_value)
 
     # recent_accuracy, diversity, elapsed_time
-    weights = np.array([0.45, 0.40, 0.15], dtype=float)
+    weights = np.array([0.60, 0.25, 0.15], dtype=float)
     score = normalized @ weights
     best_idx = int(np.argmin(score))
 
@@ -362,16 +393,42 @@ def evaluate_dynamic_moea_learnpp(chunks, config):
                 block_index=block_index,
             )
 
-            optimization_time += selected["optimizer_elapsed"]
+            replay_start = time.perf_counter()
+
+            best_candidate_model, replay_checkpoints = _rebuild_candidate_model_on_window(
+                chunks=chunks,
+                checkpoints=checkpoints,
+                block_index=block_index,
+                candidate=selected,
+                config=config,
+            )
+
+            replay_elapsed = time.perf_counter() - replay_start
+
+            # El coste de optimización incluye:
+            # 1) tiempo de NSGA-II
+            # 2) tiempo de reconstruir el candidato ganador
+            optimization_time += selected["optimizer_elapsed"] + replay_elapsed
+
+            selected["replay_elapsed"] = float(replay_elapsed)
+            selected["optimization_total_elapsed"] = float(
+                selected["optimizer_elapsed"] + replay_elapsed
+            )
+
+            # Sustituimos el modelo real por el candidato ganador completo.
+            model = best_candidate_model
+
+            # Muy importante:
+            # al sustituir el modelo por una trayectoria reconstruida,
+            # los checkpoints de esa ventana quedan desactualizados.
+            # Los reemplazamos por los checkpoints generados durante el replay.
+            window_start = selected["window_start"]
+            window_end_exclusive = selected["window_end"] + 1
+
+            checkpoints[window_start:window_end_exclusive] = replay_checkpoints
+
             reoptimization_rows.append(selected)
             pareto_frames.append(pareto_df)
-
-            model.set_config(
-                a=selected["a"],
-                b=selected["b"],
-                grace_period=selected["grace_period"],
-                delta=selected["delta"],
-            )
 
             if config.verbose:
                 print(

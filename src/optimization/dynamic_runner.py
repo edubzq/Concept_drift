@@ -22,6 +22,10 @@ def _summary_to_df(results, dataset_name, config):
     for model_name, summary in results.items():
         is_moea = "MOEA" in model_name
 
+        final_delta = float(summary["final_delta"])
+        final_log_delta = summary.get("final_log_delta")
+        if final_log_delta is None:
+            final_log_delta = np.log10(final_delta)
         rows.append({
             "dataset": dataset_name,
             "model": model_name,
@@ -39,8 +43,8 @@ def _summary_to_df(results, dataset_name, config):
             "final_a": summary["final_a"],
             "final_b": summary["final_b"],
             "final_grace_period": summary["final_grace_period"],
-            #"final_log_delta": summary["final_log_delta"],
-            "final_delta": summary["final_delta"],
+            "final_log_delta": float(final_log_delta),
+            "final_delta": final_delta,
         })
 
     return pd.DataFrame(rows)
@@ -82,7 +86,7 @@ def _print_comparison(summary_df):
         "final_a",
         "final_b",
         "final_grace_period",
-        #"final_log_delta",
+        "final_log_delta",
         "final_delta",
     ]
 
