@@ -63,7 +63,7 @@ class LearnPPNSE:
     def _predict_base_matrix_from_records(self, X_records):
         """
         Devuelve una matriz (n_modelos, n_instancias) con la predicción de cada
-        clasificador base. Centralizar esto evita recalcular las mismas
+        clasificador base.  evita recalcular las mismas
         predicciones para accuracy, diversidad y actualización de pesos.
         """
         return np.array(
@@ -231,7 +231,7 @@ class LearnPPNSE:
             self.beta_history[k].append(beta)
 
         # ---------------------------------------------
-        # 5. Voting weights y pruning guiado por cromosoma
+        # 5. Voting weights
         # ---------------------------------------------
         self._refresh_voting_weights()
 
@@ -247,11 +247,7 @@ class LearnPPNSE:
     # Predicción
     # -------------------------------------------------
     def predict_with_base_predictions(self, X):
-        """
-        Devuelve las predicciones finales y la matriz de predicciones base.
-        Es útil para evaluar accuracy y diversidad sin hacer dos pasadas por el
-        ensemble.
-        """
+    
         if not self.models:
             raise ValueError("El ensemble está vacío.")
 
